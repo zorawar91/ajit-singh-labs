@@ -1046,7 +1046,6 @@ with tab_overview:
             ("Rate of change",       insight_velocity()),
             ("Composite scores",     insight_composite_scores()),
             ("Time since events",    insight_time_since()),
-            ("Best & worst days",    insight_best_worst()),
             ("Markers moving together", insight_clusters()),
             ("Anemia classification",   insight_anemia()),
         ]
