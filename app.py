@@ -708,7 +708,7 @@ def render_chart(name, period_days=None, key_prefix="chart"):
 # Tabs
 # ============================================================================
 tab_overview, tab_trends, tab_overlay, tab_compare, tab_table = st.tabs(
-    ["Overview", "Trends", "Multi-Param", "Compare Dates", "Full Table"]
+    ["Overview", "Trends", "Compare Trends", "Compare Dates", "Full Table"]
 )
 
 # -------- Overview tab --------
@@ -826,9 +826,9 @@ with tab_trends:
 
 # -------- Multi-Param overlay tab --------
 with tab_overlay:
-    st.markdown("### Compare Multiple Parameters")
+    st.markdown("### Compare Trends Across Parameters")
     st.caption(
-        "Overlay up to 5 lab parameters on one chart. "
+        "Overlay up to 5 lab parameters on one chart to see how they move together. "
         "Because parameters have different scales (mg/dL, U/L, /µL, etc.), values are normalized "
         "to **percent of the upper reference limit** so trends across markers are visually comparable. "
         "A horizontal line at 100% marks the upper limit; values above the line are out of range."
