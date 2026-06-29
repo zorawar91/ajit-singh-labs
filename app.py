@@ -31,6 +31,73 @@ PATIENT_NAME = st.secrets.get("patient_name", "Patient")
 PATIENT_DX = st.secrets.get("patient_dx", "")
 APP_TITLE = st.secrets.get("app_title", "Lab Tracker")
 
+# Plain-language clinical context for each parameter (displayed under cards and charts)
+PARAM_INFO = {
+    'CA 19-9': 'Tumor marker for biliary & pancreatic cancers. Trends matter more than single values.',
+    'CEA': 'General tumor marker, useful for tracking cancer activity over time.',
+    'AFP (Alpha Fetoprotein)': 'Tumor marker; elevated in some liver cancers.',
+    'Bilirubin - Total': 'Total bile pigment in blood. High = jaundice, bile duct or liver issue.',
+    'Bilirubin - Direct': 'Conjugated bilirubin; high suggests bile duct obstruction or liver damage.',
+    'Bilirubin - Indirect': 'Unconjugated bilirubin; high suggests excess red cell breakdown.',
+    'ALT (SGPT)': 'Liver enzyme. Elevated = active liver cell injury.',
+    'AST (SGOT)': 'Liver/muscle enzyme. Elevated alongside ALT suggests liver injury.',
+    'GGT': 'Bile duct enzyme. Elevated with biliary obstruction or alcohol use.',
+    'Alkaline Phosphatase (ALP)': 'Bile duct / bone enzyme. High = bile duct issue or bone turnover.',
+    'Total Protein': 'Total serum proteins (albumin + globulin).',
+    'Albumin': 'Main blood protein, made by liver. Low = poor liver synthesis or malnutrition.',
+    'Globulin': 'Antibody / inflammation-related proteins.',
+    'A/G Ratio': 'Albumin to Globulin ratio. Low suggests chronic disease or liver issue.',
+    'LDH': 'Tissue damage marker; non-specific.',
+    'Hemoglobin (Hb)': 'Oxygen-carrying protein in red blood cells. Low = anemia.',
+    'RBC Count': 'Red blood cell count. Low with low Hb = anemia.',
+    'WBC / Total Leukocyte Count': 'Total white cell count. High = infection/inflammation; low = bone marrow suppression.',
+    'Platelet Count': 'Clotting cells. Low (<150k) = bleeding risk; very low (<50k) is dangerous.',
+    'Hematocrit (PCV)': 'Fraction of blood that is red cells. Tracks with hemoglobin.',
+    'MCV': 'Average red cell size. High = vit B12/folate issue; low = iron deficiency.',
+    'MCH': 'Average hemoglobin per red cell.',
+    'MCHC': 'Hemoglobin concentration within red cells.',
+    'RDW': 'Red cell size variation. High = mixed cell populations, often early anemia.',
+    'MPV': 'Average platelet size.',
+    'Neutrophils (%)': 'Most abundant white cell; rises with bacterial infection.',
+    'Lymphocytes (%)': 'Immune cells; rise with viral infection or chronic immune activity.',
+    'Monocytes (%)': 'Cleanup white cells; rise in chronic inflammation.',
+    'Eosinophils (%)': 'Allergy/parasite-related white cells.',
+    'Basophils (%)': 'Rare white cells; allergy-related.',
+    'Absolute Neutrophil Count': 'Critical for infection risk. <1,500 = neutropenia; <500 = severe.',
+    'Absolute Lymphocyte Count': 'Total lymphocytes. Low = immunosuppression.',
+    'Absolute Monocyte Count': 'Total monocytes.',
+    'Absolute Eosinophil Count': 'Total eosinophils.',
+    'Absolute Basophil Count': 'Total basophils.',
+    'ESR': 'Inflammation marker; rises slowly with chronic inflammation.',
+    'CRP': 'Acute inflammation marker; rises fast with infection or active inflammation.',
+    'Procalcitonin': 'Bacterial infection marker; sharp rise suggests bacterial sepsis.',
+    'Blood Urea Nitrogen (BUN)': 'Kidney waste product. High = dehydration or kidney issue.',
+    'Urea': 'Same as BUN × 2.14 (different unit).',
+    'Creatinine': 'Kidney filtration marker. Rising = worsening kidney function.',
+    'Uric Acid': 'Purine breakdown product. High = gout risk or rapid cell turnover.',
+    'eGFR': 'Estimated kidney filtration rate. <60 = chronic kidney disease.',
+    'Sodium': 'Main blood electrolyte; tight regulation.',
+    'Potassium': 'Critical for heart rhythm; both high and low are dangerous.',
+    'Chloride': 'Tracks with sodium.',
+    'Calcium': 'Bone & nerve mineral.',
+    'Phosphorus': 'Bone mineral; rises in kidney disease.',
+    'Magnesium': 'Co-factor mineral; often low in chronic illness.',
+    'Bicarbonate': 'Blood pH buffer.',
+    'Prothrombin Time (PT)': 'Clotting time. High = bleeding risk; affected by liver and warfarin.',
+    'INR': 'Standardized PT. Therapeutic on warfarin is usually 2–3.',
+    'Ferritin': 'Iron storage. High = inflammation or iron overload; low = iron deficiency.',
+    'Transferrin': 'Iron transport protein. Low with high ferritin = inflammation pattern.',
+    'TSH': 'Thyroid-stimulating hormone. High = underactive thyroid; low = overactive.',
+    'Total T3': 'Total triiodothyronine (thyroid hormone).',
+    'Total T4': 'Total thyroxine (thyroid hormone).',
+    'Free T3': 'Free (active) T3.',
+    'Free T4': 'Free (active) T4.',
+    'Cortisol (AM)': 'Morning stress hormone. High = stress, steroid use; low = adrenal issue.',
+    'ACTH': 'Pituitary hormone driving cortisol production.',
+    'Random Glucose': 'Random blood sugar.',
+    'HbA1c': 'Average blood sugar over ~3 months. <5.7% = normal.',
+}
+
 st.set_page_config(
     page_title=f"{APP_TITLE} — {PATIENT_NAME}",
     page_icon="🧪",
@@ -503,6 +570,10 @@ def render_chart(name, period_days=None, key_prefix="chart"):
     cols[3].metric("Max", fmt_num(max_v, mult))
     cols[4].metric("Readings", len(df))
 
+    desc = PARAM_INFO.get(name, "")
+    if desc:
+        st.markdown(f"<div style='font-size:12px; color:#64748b; font-style:italic; margin-top:8px; padding-top:8px; border-top:1px dashed #e2e8f0; line-height:1.5;'>{desc}</div>", unsafe_allow_html=True)
+
 
 # ============================================================================
 # Tabs
@@ -558,6 +629,9 @@ with tab_overview:
             with col:
                 st.metric(label=name, value=value_str, delta=delta, delta_color="inverse" if s == "high" else "normal")
                 st.caption(f"ref {fmt_range(p_row)} {unit}")
+                desc = PARAM_INFO.get(name, "")
+                if desc:
+                    st.markdown(f"<div style='font-size:11px; color:#64748b; font-style:italic; margin-top:4px; line-height:1.4;'>{desc}</div>", unsafe_allow_html=True)
 
     st.markdown("### Key Trends")
     st.caption("14 most relevant parameters")
