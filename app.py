@@ -565,6 +565,309 @@ def build_watch():
 
 
 # ============================================================================
+# Clinical Insights — auto-derived observations from the data
+# ============================================================================
+import math
+
+def _has(name):
+    return (params_df["name"] == name).any()
+
+def _series_asc(name):
+    """Return readings DataFrame sorted oldest→newest (numeric values only)."""
+    if not _has(name):
+        return pd.DataFrame()
+    return readings_df[
+        (readings_df["parameter"] == name) & readings_df["value"].notna()
+    ].sort_values("test_date").reset_index(drop=True)
+
+def _p_row(name):
+    return params_df[params_df["name"] == name].iloc[0]
+
+
+# ---- 1. Persistence streaks ----
+def insight_streaks():
+    out = []
+    targets = [
+        'Bilirubin - Total', 'Bilirubin - Direct', 'Alkaline Phosphatase (ALP)', 'GGT',
+        'ALT (SGPT)', 'AST (SGOT)', 'Albumin', 'CRP', 'ESR',
+        'Hemoglobin (Hb)', 'Platelet Count', 'WBC / Total Leukocyte Count',
+        'Absolute Neutrophil Count', 'CA 19-9'
+    ]
+    for name in targets:
+        if not _has(name): continue
+        s = _series_asc(name)
+        if len(s) < 3: continue
+        p = _p_row(name)
+        statuses = [status_of(p, float(v)) for v in s["value"]]
+        # Count consecutive same-status from latest going back
+        last_status = statuses[-1]
+        streak = 1
+        for st_v in reversed(statuses[:-1]):
+            if st_v == last_status: streak += 1
+            else: break
+        if streak < 3: continue
+        # Date range of streak
+        streak_start_date = s.iloc[-streak]["test_date"]
+        di = display_info(p)
+        latest_v = fmt_num(float(s.iloc[-1]["value"]), di["mult"] if isinstance(di, dict) else di[0])
+        mult = di[0] if isinstance(di, tuple) else di["mult"]
+        latest_v = fmt_num(float(s.iloc[-1]["value"]), mult)
+        if last_status == "normal":
+            out.append(("✓", "improving",
+                f"<b>{name}</b> has been within range for <b>{streak} consecutive readings</b> (since {streak_start_date.strftime('%d-%b-%Y')})."))
+        elif last_status == "high":
+            out.append(("⚠", "watching",
+                f"<b>{name}</b> has been above range for <b>{streak} consecutive readings</b> (latest {latest_v}; since {streak_start_date.strftime('%d-%b-%Y')})."))
+        elif last_status == "low":
+            out.append(("⚠", "watching",
+                f"<b>{name}</b> has been below range for <b>{streak} consecutive readings</b> (latest {latest_v}; since {streak_start_date.strftime('%d-%b-%Y')})."))
+    return out
+
+
+# ---- 2. Cholestatic vs Hepatocellular (R-factor) ----
+def insight_liver_pattern():
+    out = []
+    needed = ['ALT (SGPT)', 'Alkaline Phosphatase (ALP)']
+    if not all(_has(n) for n in needed): return out
+    alt_p = _p_row('ALT (SGPT)'); alp_p = _p_row('Alkaline Phosphatase (ALP)')
+    if not (pd.notna(alt_p['hi']) and pd.notna(alp_p['hi'])): return out
+    latest_alt = get_latest('ALT (SGPT)'); latest_alp = get_latest('Alkaline Phosphatase (ALP)')
+    if not (latest_alt and latest_alp): return out
+    # R-factor = (ALT/ULN_ALT) / (ALP/ULN_ALP)
+    alt_ratio = latest_alt['value'] / float(alt_p['hi'])
+    alp_ratio = latest_alp['value'] / float(alp_p['hi'])
+    if alp_ratio <= 0: return out
+    R = alt_ratio / alp_ratio
+    if R > 5:
+        pattern, color, note = "Hepatocellular", "watching", "ALT-dominant; suggests hepatocyte injury (chemo toxicity, viral, ischemia). Less typical for biliary obstruction."
+    elif R < 2:
+        pattern, color, note = "Cholestatic", "stable", "ALP-dominant; consistent with biliary obstruction or duct injury — the expected pattern for cholangiocarcinoma."
+    else:
+        pattern, color, note = "Mixed", "watching", "Both ALT and ALP elevated proportionally; consider systemic process."
+    out.append(("🧪", color,
+        f"<b>Liver injury pattern: {pattern}</b> (R-factor = {R:.2f}). {note}"))
+    return out
+
+
+# ---- 3. Velocity / rate-of-change ----
+def insight_velocity():
+    out = []
+    targets = ['CA 19-9', 'Bilirubin - Total', 'Alkaline Phosphatase (ALP)', 'GGT',
+               'ALT (SGPT)', 'AST (SGOT)', 'CRP', 'Platelet Count',
+               'Hemoglobin (Hb)', 'WBC / Total Leukocyte Count']
+    for name in targets:
+        if not _has(name): continue
+        s = _series_asc(name)
+        if len(s) < 2: continue
+        last = float(s.iloc[-1]["value"]); prev = float(s.iloc[-2]["value"])
+        if prev == 0: continue
+        days = (s.iloc[-1]["test_date"] - s.iloc[-2]["test_date"]).days
+        if days <= 0 or days > 30: continue  # only "recent and quick" changes
+        pct = (last - prev) / prev * 100
+        if abs(pct) < 25: continue  # only notable jumps
+        di = display_info(_p_row(name)); mult = di[0]
+        arrow = "📉" if pct < 0 else "📈"
+        color = "improving" if (pct < 0 and name not in ['Hemoglobin (Hb)', 'Platelet Count', 'Albumin']) or \
+                              (pct > 0 and name in ['Hemoglobin (Hb)', 'Platelet Count', 'Albumin']) else "watching"
+        out.append((arrow, color,
+            f"<b>{name}</b> {'dropped' if pct<0 else 'rose'} <b>{abs(pct):.0f}% in {days} days</b> "
+            f"({fmt_num(prev, mult)} → {fmt_num(last, mult)})."))
+    return out
+
+
+# ---- 4. Composite clinical scores ----
+def insight_composite_scores():
+    out = []
+
+    # MELD-Na (liver disease severity)
+    bili = get_latest('Bilirubin - Total')
+    inr  = get_latest('INR')
+    creat = get_latest('Creatinine')
+    sod   = get_latest('Sodium')
+    if bili and inr and creat:
+        b = max(bili['value'], 1.0)
+        i = max(inr['value'], 1.0)
+        c = max(creat['value'], 1.0)
+        if c > 4.0: c = 4.0
+        meld = round(3.78*math.log(b) + 11.2*math.log(i) + 9.57*math.log(c) + 6.43)
+        if sod:
+            na = max(min(sod['value'], 137), 125)
+            meld = round(meld + 1.32*(137 - na) - 0.033*meld*(137 - na))
+        band = "low risk" if meld < 10 else "moderate risk" if meld < 20 else "high risk" if meld < 30 else "very high risk"
+        out.append(("📊", "stable",
+            f"<b>MELD-Na: {meld}</b> — {band} band. Liver-disease severity score combining Bilirubin, INR, Creatinine"
+            f"{' and Sodium' if sod else ''}. Lower is better; >15 typically signals significant dysfunction."))
+
+    # NLR (Neutrophil-Lymphocyte Ratio) — using absolute counts if available, else %
+    anc = get_latest('Absolute Neutrophil Count')
+    alc = get_latest('Absolute Lymphocyte Count')
+    if anc and alc and alc['value'] > 0:
+        nlr = anc['value'] / alc['value']
+        band = "favorable" if nlr < 3 else "intermediate" if nlr < 5 else "elevated"
+        out.append(("📊", "stable" if nlr < 5 else "watching",
+            f"<b>NLR (Neutrophil-Lymphocyte Ratio): {nlr:.1f}</b> — {band}. In cancer patients, NLR >5 is associated with poorer prognosis; <3 is favorable."))
+
+    # PLR (Platelet-Lymphocyte Ratio)
+    plt = get_latest('Platelet Count')
+    if plt and alc and alc['value'] > 0:
+        # Both stored in thou/µL — ratio is dimensionless when both raw
+        # PLR convention uses /µL counts, so multiply both by 1000 (cancels out)
+        plr = plt['value'] / alc['value']
+        band = "favorable" if plr < 150 else "intermediate" if plr < 300 else "elevated"
+        out.append(("📊", "stable" if plr < 300 else "watching",
+            f"<b>PLR (Platelet-Lymphocyte Ratio): {plr:.0f}</b> — {band}. >300 is associated with worse cancer outcomes."))
+
+    return out
+
+
+# ---- 5. Time-since-event landmarks ----
+def insight_time_since():
+    out = []
+    today = max(ALL_DATES) if ALL_DATES else None
+    if not today: return out
+
+    # Days since peak for tumor markers and liver enzymes
+    peak_targets = ['CA 19-9', 'Bilirubin - Total', 'Alkaline Phosphatase (ALP)', 'GGT', 'CRP']
+    for name in peak_targets:
+        s = _series_asc(name)
+        if len(s) < 3: continue
+        peak_idx = s['value'].astype(float).idxmax()
+        peak_v = float(s.loc[peak_idx, 'value'])
+        peak_d = s.loc[peak_idx, 'test_date']
+        latest_v = float(s.iloc[-1]['value'])
+        days = (today - peak_d).days
+        if days < 14: continue  # skip if peak is too recent
+        if peak_v <= 0: continue
+        change_pct = (latest_v - peak_v) / peak_v * 100
+        di = display_info(_p_row(name)); mult = di[0]
+        if change_pct < -30:
+            out.append(("🗓️", "improving",
+                f"<b>{days} days since peak {name}</b> ({fmt_num(peak_v, mult)} on {peak_d.strftime('%d-%b-%Y')}) → currently <b>{abs(change_pct):.0f}% lower</b> at {fmt_num(latest_v, mult)}."))
+
+    # Days since last reading overall
+    last_reading_date = max(ALL_DATES)
+    days_since = (date.today() - last_reading_date).days
+    if days_since > 21:
+        out.append(("📅", "watching",
+            f"<b>{days_since} days since last lab panel</b> ({last_reading_date.strftime('%d-%b-%Y')}). Consider scheduling next."))
+
+    return out
+
+
+# ---- 6. Best & worst day ----
+def insight_best_worst():
+    out = []
+    if not ALL_DATES: return out
+    day_scores = []
+    for d in ALL_DATES:
+        day_rd = readings_df[(readings_df["test_date"] == d) & readings_df["value"].notna()]
+        total = 0; in_range = 0
+        for _, r in day_rd.iterrows():
+            p_row_match = params_df[params_df["name"] == r["parameter"]]
+            if p_row_match.empty: continue
+            p = p_row_match.iloc[0]
+            if pd.isna(p["lo"]) and pd.isna(p["hi"]): continue
+            total += 1
+            if status_of(p, float(r["value"])) == "normal":
+                in_range += 1
+        if total >= 5:
+            day_scores.append((d, in_range, total, in_range/total))
+    if not day_scores: return out
+    day_scores.sort(key=lambda x: (x[3], x[1]), reverse=True)
+    best = day_scores[0]
+    worst = day_scores[-1]
+    out.append(("🌟", "improving",
+        f"<b>Most-normal day: {best[0].strftime('%d-%b-%Y')}</b> — {best[1]} of {best[2]} tracked values within range ({best[3]*100:.0f}%)."))
+    out.append(("⚠", "watching",
+        f"<b>Toughest day: {worst[0].strftime('%d-%b-%Y')}</b> — only {worst[1]} of {worst[2]} values within range ({worst[3]*100:.0f}%)."))
+    # Rank of today
+    today_rank = next((i+1 for i, (d, *_) in enumerate(day_scores) if d == max(ALL_DATES)), None)
+    if today_rank:
+        out.append(("📈", "stable",
+            f"Today's reading ranks <b>#{today_rank} of {len(day_scores)}</b> dates by in-range percentage."))
+    return out
+
+
+# ---- 7. Cluster movement ----
+def insight_clusters():
+    out = []
+    clusters = {
+        "Liver enzymes (ALT, AST, GGT, ALP)": ['ALT (SGPT)', 'AST (SGOT)', 'GGT', 'Alkaline Phosphatase (ALP)'],
+        "Inflammation (CRP, ESR)":            ['CRP', 'ESR'],
+        "CBC (Hb, Platelets, WBC)":            ['Hemoglobin (Hb)', 'Platelet Count', 'WBC / Total Leukocyte Count'],
+        "Bilirubin (Total, Direct)":          ['Bilirubin - Total', 'Bilirubin - Direct'],
+    }
+    for label, members in clusters.items():
+        directions = []
+        readings_count = 0
+        for name in members:
+            s = _series_asc(name)
+            if len(s) < 4: continue
+            recent = s.tail(4)["value"].astype(float).tolist()
+            # simple direction: compare first half average to second half
+            half = len(recent) // 2
+            d_first = sum(recent[:half]) / half
+            d_second = sum(recent[half:]) / (len(recent) - half)
+            if d_second > d_first * 1.05: directions.append('up')
+            elif d_second < d_first * 0.95: directions.append('down')
+            else: directions.append('flat')
+            readings_count += 1
+        if readings_count < 2: continue
+        if all(d == 'down' for d in directions):
+            out.append(("🔗", "improving",
+                f"<b>{label}</b> — all {readings_count} members trending <b>down together</b> over recent readings."))
+        elif all(d == 'up' for d in directions):
+            color = "concern" if "Liver" in label or "Inflammation" in label or "Bilirubin" in label else "improving"
+            out.append(("🔗", color,
+                f"<b>{label}</b> — all {readings_count} members trending <b>up together</b> over recent readings."))
+        elif len(set(directions)) > 1 and 'flat' not in directions:
+            out.append(("🔗", "watching",
+                f"<b>{label}</b> — members moving in <b>different directions</b> ({', '.join(directions)})."))
+    return out
+
+
+# ---- 8. Anemia pattern classifier ----
+def insight_anemia():
+    out = []
+    hb = get_latest('Hemoglobin (Hb)')
+    if not hb: return out
+    p_hb = _p_row('Hemoglobin (Hb)')
+    if status_of(p_hb, hb['value']) != 'low': return out  # only relevant if anemic
+    mcv = get_latest('MCV')
+    rdw = get_latest('RDW')
+    ferritin = get_latest('Ferritin')
+    transferrin = get_latest('Transferrin')
+    clues = []
+    classification = None
+    if mcv and mcv['value'] < 80:
+        classification = "Microcytic — favors iron deficiency or thalassemia trait"
+        clues.append(f"MCV low at {mcv['value']:.1f}")
+        if ferritin and ferritin['value'] < 30:
+            classification = "Iron deficiency anemia"; clues.append(f"Ferritin low at {ferritin['value']:.0f}")
+    elif mcv and mcv['value'] > 100:
+        classification = "Macrocytic — consider B12/folate deficiency or chemo effect"
+        clues.append(f"MCV high at {mcv['value']:.1f}")
+    elif mcv and 80 <= mcv['value'] <= 100:
+        # Normocytic - most common in chronic disease
+        clues.append(f"MCV normal at {mcv['value']:.1f}")
+        if ferritin and ferritin['value'] > 200 and transferrin and transferrin['value'] < 200:
+            classification = "Anemia of chronic disease"
+            clues.append(f"Ferritin high ({ferritin['value']:.0f}), Transferrin low ({transferrin['value']:.0f})")
+        elif rdw and rdw['value'] > 14.5:
+            classification = "Normocytic with high RDW — mixed picture, likely chronic disease ± iron component"
+            clues.append(f"RDW high at {rdw['value']:.1f}")
+        else:
+            classification = "Normocytic anemia — common in chronic illness"
+    if classification:
+        guidance = ""
+        if "chronic disease" in classification.lower():
+            guidance = " Oral iron supplementation is usually ineffective in this pattern; addressing underlying inflammation is the main lever. A fresh iron panel (Ferritin, Transferrin, TIBC, Transferrin saturation) is worth discussing."
+        out.append(("🩸", "watching",
+            f"<b>Anemia pattern: {classification}.</b><br><span style='color:#475569; font-size:11px;'>Clues: {'; '.join(clues)}.</span>{guidance}"))
+    return out
+
+
+# ============================================================================
 # Helpers — defined BEFORE tabs so they're available when overview renders
 # ============================================================================
 def _build_figure(name, p_row, df, mult, unit, height=320, label_textsize=10):
@@ -732,6 +1035,45 @@ with tab_overview:
                 st.markdown(f'<div class="watch-card {k}"><h4>{title} ({len(items)})</h4>{items_html}</div>', unsafe_allow_html=True)
     else:
         st.info("Not enough data points yet for trend assessment.")
+
+    # ---- Clinical Insights (auto-generated observations) ----
+    st.divider()
+    st.markdown("### 🩺 Clinical Insights")
+    st.caption("Auto-derived from the data. Pattern observations, not medical advice — always discuss with the treating oncologist.")
+
+    insight_groups = [
+        ("Persistence patterns", insight_streaks()),
+        ("Liver injury pattern", insight_liver_pattern()),
+        ("Rate of change",       insight_velocity()),
+        ("Composite scores",     insight_composite_scores()),
+        ("Time since events",    insight_time_since()),
+        ("Best & worst days",    insight_best_worst()),
+        ("Markers moving together", insight_clusters()),
+        ("Anemia classification",   insight_anemia()),
+    ]
+    # Drop empty groups
+    insight_groups = [(t, items) for t, items in insight_groups if items]
+
+    if not insight_groups:
+        st.info("Not enough data yet to surface insights — needs at least 3 consecutive readings per parameter.")
+    else:
+        # 2-column grid of insight category boxes
+        for i in range(0, len(insight_groups), 2):
+            row = insight_groups[i:i+2]
+            cols = st.columns(len(row))
+            for col, (title, items) in zip(cols, row):
+                with col:
+                    with st.container(border=True):
+                        st.markdown(f"<div style='font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#2563eb; margin-bottom:8px;'>{title}</div>", unsafe_allow_html=True)
+                        for icon, color_class, text in items:
+                            color_map = {"improving":"#15803d", "stable":"#475569", "watching":"#b45309", "concern":"#b91c1c"}
+                            border_color = color_map.get(color_class, "#94a3b8")
+                            st.markdown(
+                                f"<div style='font-size:13px; line-height:1.5; padding:6px 10px; margin:6px 0; border-left:3px solid {border_color}; background:#fff; border-radius:0 6px 6px 0;'>"
+                                f"<span style='margin-right:6px;'>{icon}</span>{text}"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
 
     st.divider()
     st.markdown(f"### Latest Results &nbsp;<small style='color:#64748b'>as of {latest_date.strftime('%d-%b-%Y') if latest_date else '—'}</small>", unsafe_allow_html=True)
