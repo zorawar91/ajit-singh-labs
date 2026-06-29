@@ -1,12 +1,17 @@
 """
-Papa's Lab Tracker — Streamlit app.
+Lab Tracker — Streamlit app.
 
 Loads data from a Neon Postgres database, password-protected.
 Mirrors the HTML dashboard: Overview / Trends / Compare / Full Table.
 
 Required Streamlit secrets:
-    neon_db = "postgresql://user:pwd@host/db?sslmode=require"
-    app_password = "your-strong-shared-password"
+    neon_db        = "postgresql://user:pwd@host/db?sslmode=require"
+    app_password   = "your-strong-shared-password"
+
+Optional Streamlit secrets (UI display only — no PII in this code by default):
+    patient_name   = "Patient name to show on the dashboard"
+    patient_dx     = "Diagnosis or condition shown under the name"
+    app_title      = "Lab Tracker"
 """
 import json
 import hmac
@@ -21,8 +26,13 @@ import plotly.graph_objects as go
 # ============================================================================
 # Page config
 # ============================================================================
+# Patient info pulled from secrets so this code stays generic / safe to publish.
+PATIENT_NAME = st.secrets.get("patient_name", "Patient")
+PATIENT_DX = st.secrets.get("patient_dx", "")
+APP_TITLE = st.secrets.get("app_title", "Lab Tracker")
+
 st.set_page_config(
-    page_title="Lab Tracker — Ajit Singh",
+    page_title=f"{APP_TITLE} — {PATIENT_NAME}",
     page_icon="🧪",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -75,7 +85,7 @@ def check_password() -> bool:
     if st.session_state.get("authenticated"):
         return True
 
-    st.markdown("## 🔒 Lab Tracker")
+    st.markdown(f"## 🔒 {APP_TITLE}")
     st.caption("Enter the password to view records.")
     with st.form("login"):
         pwd = st.text_input("Password", type="password")
@@ -202,7 +212,7 @@ def get_previous(param_name, before_date):
 # ============================================================================
 # Header
 # ============================================================================
-st.markdown(f"## Lab Tracker — Ajit Singh")
+st.markdown(f"## {APP_TITLE} — {PATIENT_NAME}")
 st.caption(meta.get("subtitle", ""))
 
 # Patient banner
@@ -226,8 +236,8 @@ banner_html = f"""
 <div class="patient-banner">
   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
     <div>
-      <div style="font-size:18px; font-weight:700;">Mr. Ajit Singh</div>
-      <div style="font-size:11px; color:#2563eb; font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Cholangiocarcinoma — Liver Treatment</div>
+      <div style="font-size:18px; font-weight:700;">{PATIENT_NAME}</div>
+      {f'<div style="font-size:11px; color:#2563eb; font-weight:600; text-transform:uppercase; letter-spacing:.5px;">{PATIENT_DX}</div>' if PATIENT_DX else ''}
       <div style="font-size:12px; color:#64748b; margin-top:6px;">
         <b>Total reports:</b> {len(ALL_DATES)} dates &nbsp;·&nbsp;
         <b>Latest:</b> {latest_date.strftime('%d-%b-%Y') if latest_date else '—'}
