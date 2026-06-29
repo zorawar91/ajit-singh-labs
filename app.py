@@ -552,19 +552,24 @@ def build_watch():
 # Helpers — defined BEFORE tabs so they're available when overview renders
 # ============================================================================
 def _build_figure(name, p_row, df, mult, unit, height=320, label_textsize=10):
-    """Build the Plotly figure (shared between inline render and modal expand)."""
+    """Build the Plotly figure (shared between inline render and modal expand).
+    Hides per-point text labels when the series gets dense, for clarity."""
     def col_for(v):
         s = status_of(p_row, float(v))
         return "#ef4444" if s == "high" else "#f59e0b" if s == "low" else "#2563eb"
     point_colors = [col_for(v) for v in df["value"]]
 
+    n = len(df)
+    show_labels = n <= 12  # hide labels on dense series
+    mode = "lines+markers+text" if show_labels else "lines+markers"
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["test_date"], y=df["disp"],
-        mode="lines+markers+text",
+        mode=mode,
         line=dict(color="#2563eb", width=2.5),
-        marker=dict(color=point_colors, size=9, line=dict(width=0)),
-        text=[fmt_num(float(v), mult) for v in df["value"]],
+        marker=dict(color=point_colors, size=10, line=dict(width=1, color="#fff")),
+        text=[fmt_num(float(v), mult) for v in df["value"]] if show_labels else None,
         textposition="top center",
         textfont=dict(size=label_textsize, color="#334155"),
         name=name,
@@ -585,11 +590,12 @@ def _build_figure(name, p_row, df, mult, unit, height=320, label_textsize=10):
 
     fig.update_layout(
         xaxis_title=None, yaxis_title=unit or None,
-        margin=dict(l=10, r=10, t=10, b=10), height=height,
+        margin=dict(l=10, r=20, t=20, b=10), height=height,
         showlegend=False, hovermode="x unified",
         plot_bgcolor="white", paper_bgcolor="white",
-        xaxis=dict(showgrid=False),
-        yaxis=dict(gridcolor="rgba(0,0,0,0.05)"),
+        font=dict(size=12, color="#0f172a"),
+        xaxis=dict(showgrid=False, tickfont=dict(size=11), nticks=8),
+        yaxis=dict(gridcolor="rgba(0,0,0,0.06)", tickfont=dict(size=11), title_font=dict(size=12)),
     )
     return fig
 
@@ -685,7 +691,9 @@ def render_chart(name, period_days=None, key_prefix="chart"):
 # ============================================================================
 # Tabs
 # ============================================================================
-tab_overview, tab_trends, tab_compare, tab_table = st.tabs(["Overview", "Trends", "Compare Dates", "Full Table"])
+tab_overview, tab_trends, tab_overlay, tab_compare, tab_table = st.tabs(
+    ["Overview", "Trends", "Multi-Param", "Compare Dates", "Full Table"]
+)
 
 # -------- Overview tab --------
 with tab_overview:
@@ -709,6 +717,7 @@ with tab_overview:
     else:
         st.info("Not enough data points yet for trend assessment.")
 
+    st.divider()
     st.markdown(f"### Latest Results &nbsp;<small style='color:#64748b'>as of {latest_date.strftime('%d-%b-%Y') if latest_date else '—'}</small>", unsafe_allow_html=True)
 
     KEY_PARAMS = ['Hemoglobin (Hb)', 'Platelet Count', 'WBC / Total Leukocyte Count',
@@ -755,8 +764,9 @@ with tab_overview:
                         unsafe_allow_html=True,
                     )
 
+    st.divider()
     st.markdown("### Key Trends")
-    st.caption("14 most relevant parameters")
+    st.caption("14 most relevant parameters · click ⛶ on any chart to expand")
     chart_cols = st.columns(2)
     for i, name in enumerate(CHARTED):
         if not (params_df["name"] == name).any():
@@ -796,6 +806,133 @@ with tab_trends:
         for i, (_, p_row) in enumerate(sel_params.iterrows()):
             with chart_cols[i % 2]:
                 render_chart(p_row["name"], period_days=period_days, key_prefix="tr")
+
+
+# -------- Multi-Param overlay tab --------
+with tab_overlay:
+    st.markdown("### Compare Multiple Parameters")
+    st.caption(
+        "Overlay up to 5 lab parameters on one chart. "
+        "Because parameters have different scales (mg/dL, U/L, /µL, etc.), values are normalized "
+        "to **percent of the upper reference limit** so trends across markers are visually comparable. "
+        "A horizontal line at 100% marks the upper limit; values above the line are out of range."
+    )
+
+    # Pre-selected medically meaningful set for cholangiocarcinoma — adjust freely
+    default_set = [
+        "Bilirubin - Total", "Alkaline Phosphatase (ALP)", "GGT", "CRP", "CA 19-9"
+    ]
+    available = sorted([p for p in params_df["name"].tolist()
+                        if pd.notna(params_df.loc[params_df["name"] == p, "hi"].iloc[0])])
+    default_in_available = [p for p in default_set if p in available]
+
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        selected = st.multiselect(
+            "Choose up to 5 parameters",
+            options=available,
+            default=default_in_available,
+            max_selections=5,
+            help="Only parameters with a defined upper reference limit can be normalized.",
+        )
+    with col_b:
+        period_overlay = st.selectbox(
+            "Period",
+            ["All time", "Last 30 days", "Last 90 days", "Last 6 months", "Last 1 year"],
+            key="overlay_period",
+        )
+
+    if not selected:
+        st.info("Pick at least one parameter from the dropdown.")
+    else:
+        # Color palette — distinct, colorblind-friendly
+        palette = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"]
+        period_days = {
+            "All time": None, "Last 30 days": 30, "Last 90 days": 90,
+            "Last 6 months": 180, "Last 1 year": 365,
+        }[period_overlay]
+
+        fig = go.Figure()
+        for i, name in enumerate(selected):
+            p_row = params_df[params_df["name"] == name].iloc[0]
+            df_p = get_readings(name)
+            if period_days is not None and not df_p.empty:
+                cutoff = max(df_p["test_date"]) - pd.Timedelta(days=period_days)
+                df_p = df_p[df_p["test_date"] >= cutoff]
+            if df_p.empty:
+                continue
+            hi = float(p_row["hi"])
+            unit = p_row["unit"] or ""
+            df_p = df_p.copy()
+            df_p["normalized"] = df_p["value"].astype(float) / hi * 100
+            fig.add_trace(go.Scatter(
+                x=df_p["test_date"], y=df_p["normalized"],
+                mode="lines+markers",
+                name=f"{name}",
+                line=dict(color=palette[i], width=2.5),
+                marker=dict(size=8, color=palette[i], line=dict(width=1, color="#fff")),
+                customdata=list(zip(df_p["value"].astype(float), [unit] * len(df_p), [hi] * len(df_p))),
+                hovertemplate=(
+                    f"<b>{name}</b><br>"
+                    "%{x|%d-%b-%Y}<br>"
+                    "Value: %{customdata[0]:,.2f} %{customdata[1]}<br>"
+                    "Upper limit: %{customdata[2]:,.2f} %{customdata[1]}<br>"
+                    "<b>%{y:.0f}%</b> of upper limit"
+                    "<extra></extra>"
+                ),
+            ))
+
+        # Upper limit reference
+        fig.add_hline(
+            y=100, line_dash="dash", line_color="rgba(220,38,38,0.55)",
+            annotation_text="upper limit (100%)", annotation_position="top right",
+            annotation_font_size=11,
+        )
+        # Shaded "normal zone" below 100%
+        fig.add_hrect(y0=0, y1=100, fillcolor="rgba(34,197,94,0.05)", line_width=0, layer="below")
+
+        fig.update_layout(
+            height=520,
+            margin=dict(l=20, r=20, t=30, b=80),
+            plot_bgcolor="white", paper_bgcolor="white",
+            font=dict(size=12, color="#0f172a"),
+            xaxis=dict(showgrid=False, tickfont=dict(size=11), nticks=10),
+            yaxis=dict(
+                title=dict(text="% of upper reference limit", font=dict(size=12)),
+                gridcolor="rgba(0,0,0,0.06)", tickfont=dict(size=11),
+                tickformat=".0f", ticksuffix="%",
+            ),
+            hovermode="x unified",
+            legend=dict(
+                orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5,
+                font=dict(size=11), bgcolor="rgba(0,0,0,0)",
+            ),
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="overlay_chart")
+
+        # Quick clinical-context legend below the chart
+        st.divider()
+        st.markdown("##### What you're seeing")
+        leg_cols = st.columns(len(selected))
+        for i, name in enumerate(selected):
+            p_row = params_df[params_df["name"] == name].iloc[0]
+            mult, unit = display_info(p_row)
+            latest = get_latest(name)
+            if latest:
+                pct_of_hi = latest["value"] / float(p_row["hi"]) * 100 if pd.notna(p_row["hi"]) else None
+                pct_str = f"{pct_of_hi:.0f}% of limit" if pct_of_hi is not None else ""
+                desc = PARAM_INFO.get(name, "")
+                with leg_cols[i]:
+                    with st.container(border=True):
+                        st.markdown(
+                            f"""
+                            <div style="font-weight:700; color:{palette[i]}; font-size:13px;">● {name}</div>
+                            <div style="font-size:18px; font-weight:700; margin:4px 0;">{fmt_num(latest['value'], mult)} {unit}</div>
+                            <div style="font-size:11px; color:#64748b;">{pct_str} · ref {fmt_range(p_row)}</div>
+                            {f'<div style="font-size:11px; color:#475569; font-style:italic; margin-top:6px; line-height:1.4;">{desc}</div>' if desc else ''}
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
 
 # -------- Compare Dates tab --------
