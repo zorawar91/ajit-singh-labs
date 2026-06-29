@@ -147,7 +147,23 @@ st.markdown("""
     border: 1px solid #e2e8f0 !important;
     border-radius: 12px !important;
     padding: 14px 16px !important;
+    height: 100% !important;  /* stretch to fill the column height */
+    display: flex !important;
+    flex-direction: column !important;
   }
+  /* Make every column stretch its child to the row's tallest sibling */
+  div[data-testid="column"] {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  div[data-testid="column"] > div { flex: 1 1 auto; }
+  div[data-testid="column"] > div > div[data-testid="stVerticalBlock"] {
+    height: 100%;
+  }
+  /* Reserve consistent space for the description so cards align */
+  .param-desc { min-height: 2.8em; }
+  .param-meta { min-height: 1.2em; }
+  .trend-line { min-height: 1.4em; }
   /* LOUDER status colors */
   .pill-high  { background: #fee2e2; color: #b91c1c; font-weight: 800; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; border: 1.5px solid #ef4444; }
   .pill-low   { background: #fef3c7; color: #b45309; font-weight: 800; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; border: 1.5px solid #f59e0b; }
