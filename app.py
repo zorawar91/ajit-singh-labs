@@ -19,6 +19,7 @@ from datetime import date, datetime
 from collections import defaultdict
 
 import streamlit as st
+import streamlit.components.v1 as components
 import psycopg
 import pandas as pd
 import plotly.graph_objects as go
@@ -104,6 +105,36 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# Inject meta description + Open Graph tags into the document <head>.
+# Streamlit doesn't expose these via set_page_config, so we use a tiny
+# components.html() snippet that runs JS against parent.document.
+import json as _json
+_META_DESC = st.secrets.get("meta_description", "Private lab tracker. Sign-in required.")
+_PAGE_TITLE = f"{APP_TITLE} — {PATIENT_NAME}"
+components.html(f"""
+<script>
+  try {{
+    const head = parent.document.head;
+    const setMeta = (name, content, attr = 'name') => {{
+      let el = head.querySelector(`meta[${{attr}}="${{name}}"]`);
+      if (!el) {{
+        el = parent.document.createElement('meta');
+        el.setAttribute(attr, name);
+        head.appendChild(el);
+      }}
+      el.setAttribute('content', content);
+    }};
+    setMeta('description', {_json.dumps(_META_DESC)});
+    setMeta('og:title', {_json.dumps(_PAGE_TITLE)}, 'property');
+    setMeta('og:description', {_json.dumps(_META_DESC)}, 'property');
+    setMeta('og:type', 'website', 'property');
+    setMeta('twitter:card', 'summary');
+    setMeta('twitter:title', {_json.dumps(_PAGE_TITLE)});
+    setMeta('twitter:description', {_json.dumps(_META_DESC)});
+  }} catch (e) {{ /* sandboxed contexts can't reach parent; ignore */ }}
+</script>
+""", height=0)
 
 # Tighter spacing + louder status colors
 st.markdown("""
