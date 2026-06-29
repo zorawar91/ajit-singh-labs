@@ -429,7 +429,7 @@ def build_watch():
 # ============================================================================
 # Helpers — defined BEFORE tabs so they're available when overview renders
 # ============================================================================
-def render_chart(name, period_days=None):
+def render_chart(name, period_days=None, key_prefix="chart"):
     if not (params_df["name"] == name).any():
         st.info(f"Parameter '{name}' not found")
         return
@@ -484,7 +484,7 @@ def render_chart(name, period_days=None):
         xaxis=dict(showgrid=False),
         yaxis=dict(gridcolor="rgba(0,0,0,0.05)"),
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"{key_prefix}_chart_{name}")
 
     latest_v = float(df.iloc[-1]["value"])
     prev_v = float(df.iloc[-2]["value"]) if len(df) >= 2 else None
@@ -566,7 +566,7 @@ with tab_overview:
         if not (params_df["name"] == name).any():
             continue
         with chart_cols[i % 2]:
-            render_chart(name)
+            render_chart(name, key_prefix="ov")
 
 
 # -------- Trends tab --------
@@ -599,7 +599,7 @@ with tab_trends:
         chart_cols = st.columns(2)
         for i, (_, p_row) in enumerate(sel_params.iterrows()):
             with chart_cols[i % 2]:
-                render_chart(p_row["name"], period_days=period_days)
+                render_chart(p_row["name"], period_days=period_days, key_prefix="tr")
 
 
 # -------- Compare Dates tab --------
