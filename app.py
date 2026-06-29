@@ -1016,121 +1016,116 @@ tab_overview, tab_trends, tab_overlay, tab_compare, tab_table = st.tabs(
 
 # -------- Overview tab --------
 with tab_overview:
-    st.markdown("### Clinical Watch")
-    st.caption("Automated summary across recent readings — discuss specifics with the treating oncologist.")
-    findings = build_watch()
-    buckets = [
-        ("improving", "✓ Improving"),
-        ("stable", "○ Stable / In Range"),
-        ("watching", "◐ Watching"),
-        ("concern", "! Concerns"),
-    ]
-    non_empty = [(k, t) for k, t in buckets if findings[k]]
-    if non_empty:
-        cols = st.columns(len(non_empty))
-        for col, (k, title) in zip(cols, non_empty):
-            items = findings[k]
-            with col:
-                items_html = "".join(f'<div class="watch-item"><b>{n}</b><span>{d}</span></div>' for n, d in items)
-                st.markdown(f'<div class="watch-card {k}"><h4>{title} ({len(items)})</h4>{items_html}</div>', unsafe_allow_html=True)
-    else:
-        st.info("Not enough data points yet for trend assessment.")
+    # ===== Clinical Watch =====
+    with st.expander("🔍 Clinical Watch — automated summary across recent readings", expanded=True):
+        st.caption("Discuss specifics with the treating oncologist.")
+        findings = build_watch()
+        buckets = [
+            ("improving", "✓ Improving"),
+            ("stable", "○ Stable / In Range"),
+            ("watching", "◐ Watching"),
+            ("concern", "! Concerns"),
+        ]
+        non_empty = [(k, t) for k, t in buckets if findings[k]]
+        if non_empty:
+            cols = st.columns(len(non_empty))
+            for col, (k, title) in zip(cols, non_empty):
+                items = findings[k]
+                with col:
+                    items_html = "".join(f'<div class="watch-item"><b>{n}</b><span>{d}</span></div>' for n, d in items)
+                    st.markdown(f'<div class="watch-card {k}"><h4>{title} ({len(items)})</h4>{items_html}</div>', unsafe_allow_html=True)
+        else:
+            st.info("Not enough data points yet for trend assessment.")
 
-    # ---- Clinical Insights (auto-generated observations) ----
-    st.divider()
-    st.markdown("### 🩺 Clinical Insights")
-    st.caption("Auto-derived from the data. Pattern observations, not medical advice — always discuss with the treating oncologist.")
+    # ===== Clinical Insights =====
+    with st.expander("🩺 Clinical Insights — auto-derived observations", expanded=True):
+        st.caption("Pattern observations, not medical advice — always discuss with the treating oncologist.")
+        insight_groups = [
+            ("Persistence patterns", insight_streaks()),
+            ("Liver injury pattern", insight_liver_pattern()),
+            ("Rate of change",       insight_velocity()),
+            ("Composite scores",     insight_composite_scores()),
+            ("Time since events",    insight_time_since()),
+            ("Best & worst days",    insight_best_worst()),
+            ("Markers moving together", insight_clusters()),
+            ("Anemia classification",   insight_anemia()),
+        ]
+        insight_groups = [(t, items) for t, items in insight_groups if items]
+        if not insight_groups:
+            st.info("Not enough data yet to surface insights — needs at least 3 consecutive readings per parameter.")
+        else:
+            for i in range(0, len(insight_groups), 2):
+                row = insight_groups[i:i+2]
+                cols = st.columns(len(row))
+                for col, (title, items) in zip(cols, row):
+                    with col:
+                        with st.container(border=True):
+                            st.markdown(f"<div style='font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#2563eb; margin-bottom:8px;'>{title}</div>", unsafe_allow_html=True)
+                            for icon, color_class, text in items:
+                                color_map = {"improving":"#15803d", "stable":"#475569", "watching":"#b45309", "concern":"#b91c1c"}
+                                border_color = color_map.get(color_class, "#94a3b8")
+                                st.markdown(
+                                    f"<div style='font-size:13px; line-height:1.5; padding:6px 10px; margin:6px 0; border-left:3px solid {border_color}; background:#fff; border-radius:0 6px 6px 0;'>"
+                                    f"<span style='margin-right:6px;'>{icon}</span>{text}"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
 
-    insight_groups = [
-        ("Persistence patterns", insight_streaks()),
-        ("Liver injury pattern", insight_liver_pattern()),
-        ("Rate of change",       insight_velocity()),
-        ("Composite scores",     insight_composite_scores()),
-        ("Time since events",    insight_time_since()),
-        ("Best & worst days",    insight_best_worst()),
-        ("Markers moving together", insight_clusters()),
-        ("Anemia classification",   insight_anemia()),
-    ]
-    # Drop empty groups
-    insight_groups = [(t, items) for t, items in insight_groups if items]
-
-    if not insight_groups:
-        st.info("Not enough data yet to surface insights — needs at least 3 consecutive readings per parameter.")
-    else:
-        # 2-column grid of insight category boxes
-        for i in range(0, len(insight_groups), 2):
-            row = insight_groups[i:i+2]
+    # ===== Latest Results =====
+    _latest_str = latest_date.strftime('%d-%b-%Y') if latest_date else '—'
+    with st.expander(f"📋 Latest Results — as of {_latest_str}", expanded=True):
+        KEY_PARAMS = ['Hemoglobin (Hb)', 'Platelet Count', 'WBC / Total Leukocyte Count',
+                      'Bilirubin - Total', 'ALT (SGPT)', 'AST (SGOT)', 'GGT',
+                      'Alkaline Phosphatase (ALP)', 'Albumin', 'CRP', 'Creatinine', 'CA 19-9']
+        rows = [KEY_PARAMS[i:i+4] for i in range(0, len(KEY_PARAMS), 4)]
+        for row in rows:
             cols = st.columns(len(row))
-            for col, (title, items) in zip(cols, row):
+            for col, name in zip(cols, row):
+                if not (params_df["name"] == name).any():
+                    continue
+                p_row = params_df[params_df["name"] == name].iloc[0]
+                latest = get_latest(name)
+                if not latest:
+                    continue
+                prev = get_previous(name, latest["date"])
+                mult, unit = display_info(p_row)
+                s = status_of(p_row, latest["value"])
+                value_str = f"{fmt_num(latest['value'], mult)} {unit}"
+                desc = PARAM_INFO.get(name, "")
+                trend_html = ""
+                if prev:
+                    diff = latest["value"] - prev["value"]
+                    if abs(diff) >= 0.005:
+                        arrow = "↑" if diff > 0 else "↓"
+                        cls = "up" if diff > 0 else "down"
+                        trend_html = f'<div class="trend-line"><span class="{cls}">{arrow} {fmt_num(abs(diff), mult)}</span> vs prior ({fmt_num(prev["value"], mult)})</div>'
+                    else:
+                        trend_html = '<div class="trend-line"><span class="flat">→ no change</span> vs prior</div>'
                 with col:
                     with st.container(border=True):
-                        st.markdown(f"<div style='font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#2563eb; margin-bottom:8px;'>{title}</div>", unsafe_allow_html=True)
-                        for icon, color_class, text in items:
-                            color_map = {"improving":"#15803d", "stable":"#475569", "watching":"#b45309", "concern":"#b91c1c"}
-                            border_color = color_map.get(color_class, "#94a3b8")
-                            st.markdown(
-                                f"<div style='font-size:13px; line-height:1.5; padding:6px 10px; margin:6px 0; border-left:3px solid {border_color}; background:#fff; border-radius:0 6px 6px 0;'>"
-                                f"<span style='margin-right:6px;'>{icon}</span>{text}"
-                                f"</div>",
-                                unsafe_allow_html=True,
-                            )
+                        st.markdown(
+                            f"""
+                            <div class="param-head">
+                              <span class="param-name">{name}</span>
+                              <span class="pill-{s}">{s}</span>
+                            </div>
+                            {f'<div class="param-desc">{desc}</div>' if desc else ''}
+                            <div class="big-value {s}">{value_str}</div>
+                            <div class="param-meta">ref {fmt_range(p_row)} {unit} &nbsp;·&nbsp; {latest["date"].strftime("%d-%b-%Y")}</div>
+                            {trend_html}
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
-    st.divider()
-    st.markdown(f"### Latest Results &nbsp;<small style='color:#64748b'>as of {latest_date.strftime('%d-%b-%Y') if latest_date else '—'}</small>", unsafe_allow_html=True)
-
-    KEY_PARAMS = ['Hemoglobin (Hb)', 'Platelet Count', 'WBC / Total Leukocyte Count',
-                  'Bilirubin - Total', 'ALT (SGPT)', 'AST (SGOT)', 'GGT',
-                  'Alkaline Phosphatase (ALP)', 'Albumin', 'CRP', 'Creatinine', 'CA 19-9']
-    rows = [KEY_PARAMS[i:i+4] for i in range(0, len(KEY_PARAMS), 4)]
-    for row in rows:
-        cols = st.columns(len(row))
-        for col, name in zip(cols, row):
+    # ===== Key Trends =====
+    with st.expander("📈 Key Trends — 14 most relevant parameters", expanded=False):
+        st.caption("Click ⛶ on any chart to expand.")
+        chart_cols = st.columns(2)
+        for i, name in enumerate(CHARTED):
             if not (params_df["name"] == name).any():
                 continue
-            p_row = params_df[params_df["name"] == name].iloc[0]
-            latest = get_latest(name)
-            if not latest:
-                continue
-            prev = get_previous(name, latest["date"])
-            mult, unit = display_info(p_row)
-            s = status_of(p_row, latest["value"])
-            value_str = f"{fmt_num(latest['value'], mult)} {unit}"
-            desc = PARAM_INFO.get(name, "")
-            # Trend line
-            trend_html = ""
-            if prev:
-                diff = latest["value"] - prev["value"]
-                if abs(diff) >= 0.005:
-                    arrow = "↑" if diff > 0 else "↓"
-                    cls = "up" if diff > 0 else "down"
-                    trend_html = f'<div class="trend-line"><span class="{cls}">{arrow} {fmt_num(abs(diff), mult)}</span> vs prior ({fmt_num(prev["value"], mult)})</div>'
-                else:
-                    trend_html = '<div class="trend-line"><span class="flat">→ no change</span> vs prior</div>'
-            with col:
-                with st.container(border=True):
-                    st.markdown(
-                        f"""
-                        <div class="param-head">
-                          <span class="param-name">{name}</span>
-                          <span class="pill-{s}">{s}</span>
-                        </div>
-                        {f'<div class="param-desc">{desc}</div>' if desc else ''}
-                        <div class="big-value {s}">{value_str}</div>
-                        <div class="param-meta">ref {fmt_range(p_row)} {unit} &nbsp;·&nbsp; {latest["date"].strftime("%d-%b-%Y")}</div>
-                        {trend_html}
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-    st.divider()
-    st.markdown("### Key Trends")
-    st.caption("14 most relevant parameters · click ⛶ on any chart to expand")
-    chart_cols = st.columns(2)
-    for i, name in enumerate(CHARTED):
-        if not (params_df["name"] == name).any():
-            continue
-        with chart_cols[i % 2]:
-            render_chart(name, key_prefix="ov")
+            with chart_cols[i % 2]:
+                render_chart(name, key_prefix="ov")
 
 
 # -------- Trends tab --------
