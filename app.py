@@ -105,43 +105,67 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Tighter spacing
+# Tighter spacing + louder status colors
 st.markdown("""
 <style>
   .block-container { padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1500px; }
   h1, h2, h3 { font-weight: 600; }
-  .stMetric { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; }
-  .high-card { border-left: 4px solid #dc2626 !important; }
-  .low-card { border-left: 4px solid #d97706 !important; }
-  .normal-card { border-left: 4px solid #16a34a !important; }
-  .watch-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; border-top: 4px solid #cbd5e1; height: 100%; }
-  .watch-card.improving { border-top-color: #16a34a; }
-  .watch-card.stable { border-top-color: #94a3b8; }
-  .watch-card.watching { border-top-color: #d97706; }
-  .watch-card.concern { border-top-color: #dc2626; }
-  .watch-card h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-  .watch-card.improving h4 { color: #16a34a; }
-  .watch-card.stable h4 { color: #475569; }
-  .watch-card.watching h4 { color: #d97706; }
-  .watch-card.concern h4 { color: #dc2626; }
+  /* All Streamlit bordered containers get a soft light-grey look */
+  div[data-testid="stVerticalBlockBorderWrapper"] {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    padding: 14px 16px !important;
+  }
+  /* LOUDER status colors */
+  .pill-high  { background: #fee2e2; color: #b91c1c; font-weight: 800; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; border: 1.5px solid #ef4444; }
+  .pill-low   { background: #fef3c7; color: #b45309; font-weight: 800; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; border: 1.5px solid #f59e0b; }
+  .pill-normal{ background: #dcfce7; color: #15803d; font-weight: 800; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; border: 1.5px solid #22c55e; }
+  /* Stronger metric value colors when red/green */
+  div[data-testid="stMetricValue"] { font-size: 26px; font-weight: 700; }
+  div[data-testid="stMetricDelta"] { font-weight: 700; font-size: 13px; }
+  /* Card header row */
+  .param-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .param-name { font-weight: 700; font-size: 14px; color: #0f172a; }
+  .param-help-icon { color: #64748b; font-size: 13px; cursor: help; }
+  .param-desc { font-size: 11px; color: #475569; font-style: italic; line-height: 1.4; margin-top: 2px; }
+  .param-meta { font-size: 11px; color: #64748b; margin-top: 4px; }
+  .big-value { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; margin: 4px 0; }
+  .big-value.high   { color: #b91c1c; }
+  .big-value.low    { color: #b45309; }
+  .big-value.normal { color: #15803d; }
+  .trend-line { font-size: 12px; color: #475569; margin-top: 4px; }
+  .trend-line .up   { color: #b91c1c; font-weight: 700; }
+  .trend-line .down { color: #15803d; font-weight: 700; }
+  .trend-line .flat { color: #64748b; font-weight: 700; }
+  /* Watch cards */
+  .watch-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; border-top: 4px solid #cbd5e1; height: 100%; }
+  .watch-card.improving { border-top-color: #22c55e; }
+  .watch-card.stable    { border-top-color: #94a3b8; }
+  .watch-card.watching  { border-top-color: #f59e0b; }
+  .watch-card.concern   { border-top-color: #ef4444; }
+  .watch-card h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; font-weight: 800; }
+  .watch-card.improving h4 { color: #15803d; }
+  .watch-card.stable    h4 { color: #475569; }
+  .watch-card.watching  h4 { color: #b45309; }
+  .watch-card.concern   h4 { color: #b91c1c; }
   .watch-item { font-size: 13px; line-height: 1.45; margin: 6px 0; padding-left: 6px; border-left: 2px solid #e2e8f0; }
-  .watch-item b { font-weight: 600; }
-  .watch-item span { color: #64748b; display: block; font-size: 12px; margin-top: 2px; }
+  .watch-item b { font-weight: 700; }
+  .watch-item span { color: #475569; display: block; font-size: 12px; margin-top: 2px; }
   .patient-banner {
     background: linear-gradient(180deg, #fff, #fafbfd);
     border: 1px solid #e2e8f0; border-radius: 12px;
     padding: 16px 20px; margin-bottom: 14px;
   }
   .alert {
-    background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #dc2626;
+    background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444;
     border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; font-size: 13px;
   }
-  .alert .t { font-weight: 700; color: #991b1b; margin-bottom: 4px; }
+  .alert .t { font-weight: 800; color: #991b1b; margin-bottom: 4px; }
   .alert .d { line-height: 1.7; }
-  .alert .d b { color: #dc2626; }
+  .alert .d b { color: #b91c1c; }
   .stTabs [data-baseweb="tab-list"] { gap: 4px; }
   .stTabs [data-baseweb="tab"] { padding: 10px 18px; font-weight: 500; }
-  div[data-testid="stMetricValue"] { font-size: 22px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -496,25 +520,11 @@ def build_watch():
 # ============================================================================
 # Helpers — defined BEFORE tabs so they're available when overview renders
 # ============================================================================
-def render_chart(name, period_days=None, key_prefix="chart"):
-    if not (params_df["name"] == name).any():
-        st.info(f"Parameter '{name}' not found")
-        return
-    p_row = params_df[params_df["name"] == name].iloc[0]
-    df = get_readings(name)
-    if period_days is not None and not df.empty:
-        cutoff = max(df["test_date"]) - pd.Timedelta(days=period_days)
-        df = df[df["test_date"] >= cutoff]
-    if df.empty:
-        st.markdown(f"**{name}** — no readings")
-        return
-    mult, unit = display_info(p_row)
-    df = df.copy()
-    df["disp"] = df["value"].astype(float) * mult
-
+def _build_figure(name, p_row, df, mult, unit, height=320, label_textsize=10):
+    """Build the Plotly figure (shared between inline render and modal expand)."""
     def col_for(v):
         s = status_of(p_row, float(v))
-        return "#dc2626" if s == "high" else "#d97706" if s == "low" else "#2563eb"
+        return "#ef4444" if s == "high" else "#f59e0b" if s == "low" else "#2563eb"
     point_colors = [col_for(v) for v in df["value"]]
 
     fig = go.Figure()
@@ -525,54 +535,120 @@ def render_chart(name, period_days=None, key_prefix="chart"):
         marker=dict(color=point_colors, size=9, line=dict(width=0)),
         text=[fmt_num(float(v), mult) for v in df["value"]],
         textposition="top center",
-        textfont=dict(size=10, color="#475569"),
+        textfont=dict(size=label_textsize, color="#334155"),
         name=name,
         hovertemplate=f"<b>{name}</b><br>%{{x|%d-%b-%Y}}<br>%{{y:,.2f}} {unit}<extra></extra>",
     ))
     if pd.notna(p_row["hi"]) and pd.notna(p_row["lo"]):
         hi_d = float(p_row["hi"]) * mult
         lo_d = float(p_row["lo"]) * mult
-        fig.add_hrect(y0=lo_d, y1=hi_d, fillcolor="rgba(22,163,74,0.08)", line_width=0, layer="below")
-        fig.add_hline(y=hi_d, line_dash="dash", line_color="rgba(22,163,74,0.4)")
-        fig.add_hline(y=lo_d, line_dash="dash", line_color="rgba(22,163,74,0.4)")
+        fig.add_hrect(y0=lo_d, y1=hi_d, fillcolor="rgba(34,197,94,0.10)", line_width=0, layer="below")
+        fig.add_hline(y=hi_d, line_dash="dash", line_color="rgba(34,197,94,0.5)")
+        fig.add_hline(y=lo_d, line_dash="dash", line_color="rgba(34,197,94,0.5)")
     elif pd.notna(p_row["hi"]):
-        fig.add_hline(y=float(p_row["hi"]) * mult, line_dash="dash", line_color="rgba(220,38,38,0.55)",
+        fig.add_hline(y=float(p_row["hi"]) * mult, line_dash="dash", line_color="rgba(239,68,68,0.65)",
                       annotation_text=f"max {fmt_num(float(p_row['hi']), mult)}", annotation_position="top right")
     elif pd.notna(p_row["lo"]):
-        fig.add_hline(y=float(p_row["lo"]) * mult, line_dash="dash", line_color="rgba(217,119,6,0.55)",
+        fig.add_hline(y=float(p_row["lo"]) * mult, line_dash="dash", line_color="rgba(245,158,11,0.65)",
                       annotation_text=f"min {fmt_num(float(p_row['lo']), mult)}", annotation_position="bottom right")
 
     fig.update_layout(
-        title=dict(text=name, font=dict(size=15)),
         xaxis_title=None, yaxis_title=unit or None,
-        margin=dict(l=10, r=10, t=40, b=10), height=320,
+        margin=dict(l=10, r=10, t=10, b=10), height=height,
         showlegend=False, hovermode="x unified",
-        plot_bgcolor="white",
+        plot_bgcolor="white", paper_bgcolor="white",
         xaxis=dict(showgrid=False),
         yaxis=dict(gridcolor="rgba(0,0,0,0.05)"),
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"{key_prefix}_chart_{name}")
+    return fig
 
-    latest_v = float(df.iloc[-1]["value"])
-    prev_v = float(df.iloc[-2]["value"]) if len(df) >= 2 else None
-    min_v = float(df["value"].min())
-    max_v = float(df["value"].max())
-    s = status_of(p_row, latest_v)
-    cols = st.columns(5)
-    delta_str = None
-    if prev_v is not None and abs(latest_v - prev_v) > 0.005:
-        arrow = "↑" if latest_v > prev_v else "↓"
-        delta_str = f"{arrow} {fmt_num(abs(latest_v - prev_v), mult)}"
-    cols[0].metric("Latest", fmt_num(latest_v, mult), delta=delta_str,
-                   delta_color="inverse" if s == "high" else "normal")
-    cols[1].metric("Previous", fmt_num(prev_v, mult) if prev_v is not None else "—")
-    cols[2].metric("Min", fmt_num(min_v, mult))
-    cols[3].metric("Max", fmt_num(max_v, mult))
-    cols[4].metric("Readings", len(df))
 
+@st.dialog("Chart Detail", width="large")
+def expand_chart_dialog(name):
+    """Modal dialog showing a full-size chart for one parameter."""
+    if not (params_df["name"] == name).any():
+        st.info("Parameter not found"); return
+    p_row = params_df[params_df["name"] == name].iloc[0]
+    df = get_readings(name)
+    if df.empty:
+        st.info("No data"); return
+    mult, unit = display_info(p_row)
+    df = df.copy(); df["disp"] = df["value"].astype(float) * mult
+    s = status_of(p_row, float(df.iloc[-1]["value"]))
     desc = PARAM_INFO.get(name, "")
-    if desc:
-        st.markdown(f"<div style='font-size:12px; color:#64748b; font-style:italic; margin-top:8px; padding-top:8px; border-top:1px dashed #e2e8f0; line-height:1.5;'>{desc}</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        f"""
+        <div class="param-head">
+          <span class="param-name" style="font-size:18px;">{name}</span>
+          <span class="pill-{s}">{s}</span>
+        </div>
+        {f'<div class="param-desc" style="font-size:13px; margin-bottom:8px;">{desc}</div>' if desc else ''}
+        <div class="param-meta">{unit} &nbsp;·&nbsp; reference range {fmt_range(p_row)} &nbsp;·&nbsp; {len(df)} readings</div>
+        """,
+        unsafe_allow_html=True,
+    )
+    fig = _build_figure(name, p_row, df, mult, unit, height=480, label_textsize=11)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"modal_chart_{name}")
+
+
+def render_chart(name, period_days=None, key_prefix="chart"):
+    if not (params_df["name"] == name).any():
+        st.info(f"Parameter '{name}' not found")
+        return
+    p_row = params_df[params_df["name"] == name].iloc[0]
+    df = get_readings(name)
+    if period_days is not None and not df.empty:
+        cutoff = max(df["test_date"]) - pd.Timedelta(days=period_days)
+        df = df[df["test_date"] >= cutoff]
+    if df.empty:
+        with st.container(border=True):
+            st.markdown(f"**{name}** — no readings in selected period")
+        return
+    mult, unit = display_info(p_row)
+    df = df.copy(); df["disp"] = df["value"].astype(float) * mult
+    desc = PARAM_INFO.get(name, "")
+    latest_v = float(df.iloc[-1]["value"])
+    s_status = status_of(p_row, latest_v)
+
+    with st.container(border=True):
+        # Title row: name + status pill + expand button
+        title_col, btn_col = st.columns([8, 1])
+        with title_col:
+            st.markdown(
+                f"""
+                <div class="param-head">
+                  <span class="param-name" style="font-size:15px;">{name}</span>
+                  <span class="pill-{s_status}">{s_status}</span>
+                </div>
+                {f'<div class="param-desc">{desc}</div>' if desc else ''}
+                <div class="param-meta">{unit or ""} &nbsp;·&nbsp; ref {fmt_range(p_row)} &nbsp;·&nbsp; {p_row["panel"]}</div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with btn_col:
+            if st.button("⛶", key=f"exp_{key_prefix}_{name}", help="Expand chart"):
+                expand_chart_dialog(name)
+
+        # Chart
+        fig = _build_figure(name, p_row, df, mult, unit, height=300)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"{key_prefix}_chart_{name}")
+
+        # Stat row
+        prev_v = float(df.iloc[-2]["value"]) if len(df) >= 2 else None
+        min_v = float(df["value"].min())
+        max_v = float(df["value"].max())
+        delta_str = None
+        if prev_v is not None and abs(latest_v - prev_v) > 0.005:
+            arrow = "↑" if latest_v > prev_v else "↓"
+            delta_str = f"{arrow} {fmt_num(abs(latest_v - prev_v), mult)}"
+        cols = st.columns(5)
+        cols[0].metric("Latest", fmt_num(latest_v, mult), delta=delta_str,
+                       delta_color="inverse" if s_status == "high" else "normal")
+        cols[1].metric("Previous", fmt_num(prev_v, mult) if prev_v is not None else "—")
+        cols[2].metric("Min", fmt_num(min_v, mult))
+        cols[3].metric("Max", fmt_num(max_v, mult))
+        cols[4].metric("Readings", len(df))
 
 
 # ============================================================================
@@ -621,17 +697,32 @@ with tab_overview:
             mult, unit = display_info(p_row)
             s = status_of(p_row, latest["value"])
             value_str = f"{fmt_num(latest['value'], mult)} {unit}"
-            delta = None
+            desc = PARAM_INFO.get(name, "")
+            # Trend line
+            trend_html = ""
             if prev:
                 diff = latest["value"] - prev["value"]
                 if abs(diff) >= 0.005:
-                    delta = f"{'↑' if diff > 0 else '↓'} {fmt_num(abs(diff), mult)}"
+                    arrow = "↑" if diff > 0 else "↓"
+                    cls = "up" if diff > 0 else "down"
+                    trend_html = f'<div class="trend-line"><span class="{cls}">{arrow} {fmt_num(abs(diff), mult)}</span> vs prior ({fmt_num(prev["value"], mult)})</div>'
+                else:
+                    trend_html = '<div class="trend-line"><span class="flat">→ no change</span> vs prior</div>'
             with col:
-                st.metric(label=name, value=value_str, delta=delta, delta_color="inverse" if s == "high" else "normal")
-                st.caption(f"ref {fmt_range(p_row)} {unit}")
-                desc = PARAM_INFO.get(name, "")
-                if desc:
-                    st.markdown(f"<div style='font-size:11px; color:#64748b; font-style:italic; margin-top:4px; line-height:1.4;'>{desc}</div>", unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.markdown(
+                        f"""
+                        <div class="param-head">
+                          <span class="param-name">{name}</span>
+                          <span class="pill-{s}">{s}</span>
+                        </div>
+                        {f'<div class="param-desc">{desc}</div>' if desc else ''}
+                        <div class="big-value {s}">{value_str}</div>
+                        <div class="param-meta">ref {fmt_range(p_row)} {unit} &nbsp;·&nbsp; {latest["date"].strftime("%d-%b-%Y")}</div>
+                        {trend_html}
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
     st.markdown("### Key Trends")
     st.caption("14 most relevant parameters")
