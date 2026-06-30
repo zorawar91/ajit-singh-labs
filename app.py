@@ -867,6 +867,236 @@ def insight_anemia():
     return out
 
 
+# ---- 9. mGPS — Modified Glasgow Prognostic Score ----
+def insight_mgps():
+    out = []
+    crp = get_latest('CRP')
+    alb = get_latest('Albumin')
+    if not (crp and alb): return out
+    crp_v, alb_v = crp['value'], alb['value']
+    if crp_v > 10 and alb_v < 3.5:
+        score, band, color = 2, "worst band — both inflammation and hypoalbuminemia", "concern"
+    elif crp_v > 10:
+        score, band, color = 1, "intermediate — elevated systemic inflammation", "watching"
+    elif alb_v < 3.5:
+        score, band, color = 0, "low albumin without inflammation", "stable"
+    else:
+        score, band, color = 0, "favorable — no inflammation, nutrition adequate", "improving"
+    out.append(("📊", color,
+        f"<b>mGPS: {score}</b> — {band}. CRP {crp_v:.1f} mg/L · Albumin {alb_v:.1f} g/dL. "
+        f"Modified Glasgow Prognostic Score is one of the most validated cancer prognostic indices in GI/biliary cancers."))
+    return out
+
+
+# ---- 10. PNI — Prognostic Nutritional Index (Onodera) ----
+def insight_pni():
+    out = []
+    alb = get_latest('Albumin')
+    alc = get_latest('Absolute Lymphocyte Count')
+    if not (alb and alc): return out
+    alc_count = alc['value'] * 1000  # thou/µL → /µL
+    pni = 10 * alb['value'] + 0.005 * alc_count
+    if pni > 45:
+        band, color = "good", "improving"
+    elif pni >= 40:
+        band, color = "moderate risk", "watching"
+    else:
+        band, color = "severe risk", "concern"
+    out.append(("🧬", color,
+        f"<b>PNI: {pni:.1f}</b> — {band}. Combines nutrition (Albumin {alb['value']:.1f}) and "
+        f"immune competence (ALC {int(alc_count):,}/µL). Onodera's index; >45 good, 40–45 moderate, <40 severe."))
+    return out
+
+
+# ---- 11. CAR — CRP-Albumin Ratio ----
+def insight_car():
+    out = []
+    crp = get_latest('CRP')
+    alb = get_latest('Albumin')
+    if not (crp and alb) or alb['value'] == 0: return out
+    alb_gL = alb['value'] * 10  # g/dL → g/L
+    car = crp['value'] / alb_gL
+    if car < 0.3:
+        band, color = "favorable", "improving"
+    elif car < 0.5:
+        band, color = "intermediate", "watching"
+    else:
+        band, color = "unfavorable", "concern"
+    out.append(("🔬", color,
+        f"<b>CAR: {car:.2f}</b> — {band}. CRP {crp['value']:.1f} mg/L ÷ Albumin {alb_gL:.0f} g/L. "
+        f"Specifically validated for cholangiocarcinoma. CAR <0.3 good, >0.5 poor prognosis."))
+    return out
+
+
+# ---- 12. SII — Systemic Immune-Inflammation Index ----
+def insight_sii():
+    out = []
+    plt = get_latest('Platelet Count')
+    anc = get_latest('Absolute Neutrophil Count')
+    alc = get_latest('Absolute Lymphocyte Count')
+    if not (plt and anc and alc) or alc['value'] == 0: return out
+    sii = plt['value'] * anc['value'] / alc['value']  # all in thou/µL
+    if sii < 500:
+        band, color = "favorable", "improving"
+    elif sii < 700:
+        band, color = "intermediate", "watching"
+    else:
+        band, color = "unfavorable", "concern"
+    out.append(("🛡️", color,
+        f"<b>SII: {sii:.0f}</b> — {band}. Platelets × Neutrophils ÷ Lymphocytes "
+        f"({int(plt['value']*1000):,} × {anc['value']:.2f} ÷ {alc['value']:.2f}). "
+        f"<500 generally favorable in hepatobiliary cancers; >700 unfavorable."))
+    return out
+
+
+# ---- 13. CA 19-9 trajectory ----
+def insight_ca199_trajectory():
+    out = []
+    s = _series_asc('CA 19-9')
+    if len(s) < 3: return out
+    peak_idx = s['value'].astype(float).idxmax()
+    peak_v = float(s.loc[peak_idx, 'value'])
+    peak_d = s.loc[peak_idx, 'test_date']
+    nadir_idx = s['value'].astype(float).idxmin()
+    nadir_v = float(s.loc[nadir_idx, 'value'])
+    nadir_d = s.loc[nadir_idx, 'test_date']
+    latest_v = float(s.iloc[-1]['value'])
+    latest_d = s.iloc[-1]['test_date']
+    days_from_peak = (latest_d - peak_d).days
+    pct_reduction = (1 - latest_v / peak_v) * 100 if peak_v > 0 else 0
+    days_since_nadir = (latest_d - nadir_d).days
+    response = ("excellent" if pct_reduction > 90 else
+                "good" if pct_reduction > 50 else
+                "modest" if pct_reduction > 10 else "no response")
+    color = "improving" if pct_reduction > 50 else "watching"
+    out.append(("📉", color,
+        f"<b>CA 19-9 response: {response}.</b> Peak {peak_v:,.1f} on {peak_d.strftime('%d-%b-%Y')}; "
+        f"current {latest_v:,.1f} = <b>{pct_reduction:.0f}% reduction</b> over {days_from_peak} days. "
+        f"Nadir to date {nadir_v:,.1f} on {nadir_d.strftime('%d-%b-%Y')} ({days_since_nadir}d ago)."))
+    return out
+
+
+# ---- 14. Cachexia risk ----
+def insight_cachexia():
+    out = []
+    alb = get_latest('Albumin')
+    tp = get_latest('Total Protein')
+    ag = get_latest('A/G Ratio')
+    if not alb: return out
+    flags = []
+    if alb['value'] < 3.5:
+        flags.append(f"Albumin low ({alb['value']:.1f} g/dL)")
+    if tp and tp['value'] < 6.0:
+        flags.append(f"Total Protein low ({tp['value']:.1f} g/dL)")
+    if ag and ag['value'] < 1.0:
+        flags.append(f"A/G ratio low ({ag['value']:.2f})")
+    n = len(flags)
+    if n == 0:
+        tp_str = f", Total Protein {tp['value']:.1f}" if tp else ""
+        ag_str = f", A/G {ag['value']:.2f}" if ag else ""
+        text = (f"<b>Cachexia risk: Low.</b> Nutrition surrogates stable — "
+                f"Albumin {alb['value']:.1f}{tp_str}{ag_str}. "
+                f"Add monthly weight to the tracker for a fuller picture.")
+        color = "improving"
+    elif n == 1:
+        text = f"<b>Cachexia risk: Moderate.</b> Flag: {flags[0]}. Worth tracking weight + dietary intake."
+        color = "watching"
+    else:
+        text = f"<b>Cachexia risk: Elevated.</b> Flags: {'; '.join(flags)}. Consider nutritional support consultation."
+        color = "concern"
+    out.append(("🍎", color, text))
+    return out
+
+
+# ---- 15. Fatigue cause analyzer ----
+def insight_fatigue():
+    out = []
+    checks = []
+    likely = []
+    hb = get_latest('Hemoglobin (Hb)')
+    if hb:
+        s = status_of(_p_row('Hemoglobin (Hb)'), hb['value'])
+        if s == 'low':
+            checks.append(f"🔴 Hemoglobin {hb['value']} — anemia, likely fatigue driver")
+            likely.append('anemia')
+        else:
+            checks.append(f"🟢 Hemoglobin {hb['value']} — normal")
+    tsh = get_latest('TSH')
+    if tsh:
+        s = status_of(_p_row('TSH'), tsh['value'])
+        if s != 'normal':
+            checks.append(f"🔴 TSH {tsh['value']} — thyroid issue could contribute")
+            likely.append('thyroid')
+        else:
+            checks.append(f"🟢 TSH {tsh['value']} — thyroid axis normal")
+    cort = get_latest('Cortisol (AM)')
+    if cort:
+        s = status_of(_p_row('Cortisol (AM)'), cort['value'])
+        if s != 'normal':
+            checks.append(f"🔴 Cortisol {cort['value']:.0f} (AM) — adrenal axis off")
+            likely.append('adrenal')
+        else:
+            checks.append(f"🟢 Cortisol {cort['value']:.0f} ng/mL (AM) — normal")
+    elec_ok = True
+    for n in ['Sodium', 'Potassium', 'Magnesium']:
+        v = get_latest(n)
+        if v:
+            p = _p_row(n)
+            if status_of(p, v['value']) != 'normal':
+                elec_ok = False
+                checks.append(f"🔴 {n} {v['value']} — out of range")
+                likely.append(n.lower())
+    if elec_ok and any(get_latest(n) for n in ['Sodium', 'Potassium', 'Magnesium']):
+        checks.append("🟢 Electrolytes (Na, K, Mg) — in range")
+    hba = get_latest('HbA1c')
+    if hba:
+        if hba['value'] > 6.5:
+            checks.append(f"🔴 HbA1c {hba['value']}% — diabetic range")
+            likely.append('glucose')
+        else:
+            checks.append(f"🟢 HbA1c {hba['value']}% — not diabetic")
+    summary = (f"Most likely fatigue contributor(s): {', '.join(likely)}"
+               if likely else
+               "No common metabolic/endocrine driver flagged — fatigue likely chronic-illness or treatment-related")
+    color = "watching" if likely else "stable"
+    text = f"<b>{summary}.</b><br><span style='color:#475569; font-size:11px;'>{'<br>'.join(checks)}</span>"
+    out.append(("😴", color, text))
+    return out
+
+
+# ---- 16. Electrolyte balance ----
+def insight_electrolytes():
+    out = []
+    in_range = []
+    out_of_range = []
+    missing = []
+    for n in ['Sodium', 'Potassium', 'Chloride', 'Calcium', 'Magnesium']:
+        if not _has(n):
+            missing.append(n); continue
+        v = get_latest(n)
+        if not v:
+            missing.append(n); continue
+        p = _p_row(n)
+        s = status_of(p, v['value'])
+        if s == 'normal':
+            in_range.append(f"{n[:3]} {v['value']}")
+        else:
+            out_of_range.append(f"{n} {v['value']} ({s})")
+    if not in_range and not out_of_range:
+        return out
+    missing_str = f" Not measured recently: {', '.join(missing)}." if missing else ""
+    if out_of_range:
+        text = (f"<b>Electrolytes: imbalanced.</b> Out of range: {'; '.join(out_of_range)}."
+                f" In range: {', '.join(in_range) if in_range else 'none'}.{missing_str}")
+        color = "watching"
+    else:
+        text = (f"<b>Electrolytes: balanced.</b> All measured in range ({', '.join(in_range)}).{missing_str}"
+                + (" Worth requesting on next panel — chemo commonly depletes magnesium." if 'Magnesium' in missing else ""))
+        color = "stable"
+    out.append(("⚡", color, text))
+    return out
+
+
 # ============================================================================
 # Helpers — defined BEFORE tabs so they're available when overview renders
 # ============================================================================
@@ -1041,13 +1271,18 @@ with tab_overview:
     with st.expander("🩺 Clinical Insights — auto-derived observations", expanded=True):
         st.caption("Pattern observations, not medical advice — always discuss with the treating oncologist.")
         insight_groups = [
-            ("Persistence patterns", insight_streaks()),
-            ("Liver injury pattern", insight_liver_pattern()),
-            ("Rate of change",       insight_velocity()),
-            ("Composite scores",     insight_composite_scores()),
-            ("Time since events",    insight_time_since()),
-            ("Markers moving together", insight_clusters()),
-            ("Anemia classification",   insight_anemia()),
+            ("Persistence patterns",          insight_streaks()),
+            ("Liver injury pattern",          insight_liver_pattern()),
+            ("Rate of change",                insight_velocity()),
+            ("CA 19-9 trajectory",            insight_ca199_trajectory()),
+            ("Cancer prognostic scores",      insight_mgps() + insight_pni() + insight_car() + insight_sii()),
+            ("Other composite scores",        insight_composite_scores()),
+            ("Time since events",             insight_time_since()),
+            ("Markers moving together",       insight_clusters()),
+            ("Anemia classification",         insight_anemia()),
+            ("Cachexia / nutrition risk",     insight_cachexia()),
+            ("Fatigue cause analysis",        insight_fatigue()),
+            ("Electrolyte balance",           insight_electrolytes()),
         ]
         insight_groups = [(t, items) for t, items in insight_groups if items]
         if not insight_groups:
