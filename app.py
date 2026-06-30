@@ -675,49 +675,60 @@ def insight_velocity():
     return out
 
 
-# ---- 4. Composite clinical scores ----
-def insight_composite_scores():
+# ---- 4a. MELD-Na (liver disease severity) ----
+def insight_meldna():
     out = []
-
-    # MELD-Na (liver disease severity)
     bili = get_latest('Bilirubin - Total')
     inr  = get_latest('INR')
     creat = get_latest('Creatinine')
     sod   = get_latest('Sodium')
-    if bili and inr and creat:
-        b = max(bili['value'], 1.0)
-        i = max(inr['value'], 1.0)
-        c = max(creat['value'], 1.0)
-        if c > 4.0: c = 4.0
-        meld = round(3.78*math.log(b) + 11.2*math.log(i) + 9.57*math.log(c) + 6.43)
-        if sod:
-            na = max(min(sod['value'], 137), 125)
-            meld = round(meld + 1.32*(137 - na) - 0.033*meld*(137 - na))
-        band = "low risk" if meld < 10 else "moderate risk" if meld < 20 else "high risk" if meld < 30 else "very high risk"
-        out.append(("📊", "stable",
-            f"<b>MELD-Na: {meld}</b> — {band} band. Liver-disease severity score combining Bilirubin, INR, Creatinine"
-            f"{' and Sodium' if sod else ''}. Lower is better; >15 typically signals significant dysfunction."))
+    if not (bili and inr and creat): return out
+    b = max(bili['value'], 1.0); i = max(inr['value'], 1.0)
+    c = max(creat['value'], 1.0)
+    if c > 4.0: c = 4.0
+    meld = round(3.78*math.log(b) + 11.2*math.log(i) + 9.57*math.log(c) + 6.43)
+    if sod:
+        na = max(min(sod['value'], 137), 125)
+        meld = round(meld + 1.32*(137 - na) - 0.033*meld*(137 - na))
+    band = "low risk" if meld < 10 else "moderate risk" if meld < 20 else "high risk" if meld < 30 else "very high risk"
+    color = "stable" if meld < 10 else "watching" if meld < 20 else "concern"
+    out.append(("📊", color,
+        f"<b>MELD-Na: {meld}</b> — {band} band. Combines Bilirubin, INR, Creatinine"
+        f"{' and Sodium' if sod else ''}. Lower is better; >15 typically signals significant liver dysfunction."))
+    return out
 
-    # NLR (Neutrophil-Lymphocyte Ratio) — using absolute counts if available, else %
+
+# ---- 4b. NLR (Neutrophil-Lymphocyte Ratio) ----
+def insight_nlr():
+    out = []
     anc = get_latest('Absolute Neutrophil Count')
     alc = get_latest('Absolute Lymphocyte Count')
-    if anc and alc and alc['value'] > 0:
-        nlr = anc['value'] / alc['value']
-        band = "favorable" if nlr < 3 else "intermediate" if nlr < 5 else "elevated"
-        out.append(("📊", "stable" if nlr < 5 else "watching",
-            f"<b>NLR (Neutrophil-Lymphocyte Ratio): {nlr:.1f}</b> — {band}. In cancer patients, NLR >5 is associated with poorer prognosis; <3 is favorable."))
-
-    # PLR (Platelet-Lymphocyte Ratio)
-    plt = get_latest('Platelet Count')
-    if plt and alc and alc['value'] > 0:
-        # Both stored in thou/µL — ratio is dimensionless when both raw
-        # PLR convention uses /µL counts, so multiply both by 1000 (cancels out)
-        plr = plt['value'] / alc['value']
-        band = "favorable" if plr < 150 else "intermediate" if plr < 300 else "elevated"
-        out.append(("📊", "stable" if plr < 300 else "watching",
-            f"<b>PLR (Platelet-Lymphocyte Ratio): {plr:.0f}</b> — {band}. >300 is associated with worse cancer outcomes."))
-
+    if not (anc and alc) or alc['value'] == 0: return out
+    nlr = anc['value'] / alc['value']
+    band = "favorable" if nlr < 3 else "intermediate" if nlr < 5 else "elevated"
+    color = "stable" if nlr < 3 else "watching" if nlr < 5 else "concern"
+    out.append(("📊", color,
+        f"<b>NLR: {nlr:.1f}</b> — {band}. Neutrophil ÷ Lymphocyte. In cancer, NLR >5 associated with poorer prognosis; <3 favorable."))
     return out
+
+
+# ---- 4c. PLR (Platelet-Lymphocyte Ratio) ----
+def insight_plr():
+    out = []
+    plt = get_latest('Platelet Count')
+    alc = get_latest('Absolute Lymphocyte Count')
+    if not (plt and alc) or alc['value'] == 0: return out
+    plr = plt['value'] / alc['value']
+    band = "favorable" if plr < 150 else "intermediate" if plr < 300 else "elevated"
+    color = "stable" if plr < 150 else "watching" if plr < 300 else "concern"
+    out.append(("📊", color,
+        f"<b>PLR: {plr:.0f}</b> — {band}. Platelet ÷ Lymphocyte. >300 associated with worse cancer outcomes; <150 favorable."))
+    return out
+
+
+# Backwards-compat shim (in case something still references it)
+def insight_composite_scores():
+    return insight_meldna() + insight_nlr() + insight_plr()
 
 
 # ---- 5. Time-since-event landmarks ----
@@ -1098,6 +1109,304 @@ def insight_electrolytes():
 
 
 # ============================================================================
+# UNIQUE INSIGHTS — cancer + cholangiocarcinoma-specific
+# ============================================================================
+# ---- U1. ALBI Score (Albumin-Bilirubin) — gold-standard liver function in HCC/CCA ----
+def insight_albi():
+    out = []
+    bili = get_latest('Bilirubin - Total')
+    alb = get_latest('Albumin')
+    if not (bili and alb): return out
+    # Bilirubin: mg/dL → µmol/L (×17.1); Albumin: g/dL → g/L (×10)
+    bili_umol = max(bili['value'] * 17.1, 1.0)  # avoid log(0)
+    alb_gL = alb['value'] * 10
+    albi = math.log10(bili_umol) * 0.66 + alb_gL * -0.085
+    if albi <= -2.60:
+        grade, band, color = 1, "best — lowest mortality band", "improving"
+    elif albi <= -1.39:
+        grade, band, color = 2, "intermediate", "watching"
+    else:
+        grade, band, color = 3, "worst — highest risk", "concern"
+    out.append(("🫀", color,
+        f"<b>ALBI: Grade {grade} ({band})</b> — score {albi:.2f}. "
+        f"Computed from Bilirubin {bili['value']:.2f} mg/dL and Albumin {alb['value']:.1f} g/dL. "
+        f"Gold-standard lab-based liver function index for HCC/CCA — published cohorts show Grade 1 median survival ~2× longer than Grade 2."))
+    return out
+
+
+# ---- U2. CTCAE chemo toxicity grading ----
+def insight_ctcae():
+    out = []
+    rows = []
+    worst = 0
+
+    hb = get_latest('Hemoglobin (Hb)')
+    if hb:
+        v = hb['value']
+        if v < 6.5: g, lbl = 4, "life-threatening"
+        elif v < 8.0: g, lbl = 3, "severe"
+        elif v < 10.0: g, lbl = 2, "mild-moderate"
+        elif v < 13.0: g, lbl = 1, "mild"
+        else: g, lbl = 0, "normal"
+        worst = max(worst, g)
+        rows.append(f"Hemoglobin {v} → <b>Grade {g}</b> ({lbl})")
+
+    plt = get_latest('Platelet Count')
+    if plt:
+        v = plt['value']
+        if v < 25: g, lbl = 4, "life-threatening"
+        elif v < 50: g, lbl = 3, "severe"
+        elif v < 75: g, lbl = 2, "moderate"
+        elif v < 150: g, lbl = 1, "mild"
+        else: g, lbl = 0, "normal"
+        worst = max(worst, g)
+        rows.append(f"Platelets {int(v*1000):,}/µL → <b>Grade {g}</b> ({lbl})")
+
+    anc = get_latest('Absolute Neutrophil Count')
+    if anc:
+        v = anc['value']
+        if v < 0.5: g, lbl = 4, "life-threatening"
+        elif v < 1.0: g, lbl = 3, "severe"
+        elif v < 1.5: g, lbl = 2, "moderate"
+        elif v < 2.0: g, lbl = 1, "mild"
+        else: g, lbl = 0, "normal"
+        worst = max(worst, g)
+        rows.append(f"ANC {int(v*1000):,}/µL → <b>Grade {g}</b> ({lbl})")
+
+    bili = get_latest('Bilirubin - Total')
+    if bili:
+        v = bili['value']; uln = 1.2
+        ratio = v / uln
+        if ratio > 10: g, lbl = 4, "life-threatening"
+        elif ratio > 3: g, lbl = 3, "severe"
+        elif ratio > 1.5: g, lbl = 2, "moderate"
+        elif ratio > 1.0: g, lbl = 1, "mild"
+        else: g, lbl = 0, "normal"
+        worst = max(worst, g)
+        rows.append(f"Bilirubin {v} → <b>Grade {g}</b> ({lbl})")
+
+    creat = get_latest('Creatinine')
+    if creat:
+        v = creat['value']; uln = 1.4
+        ratio = v / uln
+        if ratio > 6: g, lbl = 4, "life-threatening"
+        elif ratio > 3: g, lbl = 3, "severe"
+        elif ratio > 1.5: g, lbl = 2, "moderate"
+        elif ratio > 1.0: g, lbl = 1, "mild"
+        else: g, lbl = 0, "normal"
+        worst = max(worst, g)
+        rows.append(f"Creatinine {v} → <b>Grade {g}</b> ({lbl})")
+
+    if not rows: return out
+    summary = ("typically allows full-dose chemo" if worst <= 1 else
+               "typically allows chemo with monitoring" if worst == 2 else
+               "usually triggers dose reduction" if worst == 3 else
+               "typically triggers treatment hold")
+    color = "improving" if worst <= 1 else "watching" if worst == 2 else "concern"
+    body = "<br>".join(rows)
+    out.append(("💊", color,
+        f"<b>CTCAE worst grade: {worst}</b> — {summary}.<br>"
+        f"<span style='color:#475569; font-size:11px;'>{body}</span>"))
+    return out
+
+
+# ---- U3. Pre-chemo readiness check ----
+def insight_chemo_ready():
+    out = []
+    checks = [
+        ('Hemoglobin (Hb)',           lambda v: v >= 10,    "≥10",         "g/dL"),
+        ('Platelet Count',            lambda v: v >= 100,   "≥100,000",    "/µL", 1000),
+        ('Absolute Neutrophil Count', lambda v: v >= 1.5,   "≥1,500",      "/µL", 1000),
+        ('Bilirubin - Total',         lambda v: v < 1.5,    "<1.5",        "mg/dL"),
+        ('Creatinine',                lambda v: v < 1.5,    "<1.5",        "mg/dL"),
+    ]
+    met = 0; total = 0; lines = []
+    for spec in checks:
+        name, pred, thresh, unit = spec[0], spec[1], spec[2], spec[3]
+        mult = spec[4] if len(spec) > 4 else 1
+        v = get_latest(name)
+        if not v: continue
+        total += 1
+        ok = pred(v['value'])
+        if ok: met += 1
+        icon = "✅" if ok else "⚠️"
+        disp = f"{int(v['value']*mult):,}" if mult > 1 else f"{v['value']}"
+        lines.append(f"{icon} {name}: {disp} {unit} (threshold {thresh})")
+    if total == 0: return out
+    if met == total:
+        color, head = "improving", "Chemo-ready: all standard thresholds met"
+    elif met >= total - 1:
+        color, head = "watching", f"Mostly ready: {met} of {total} thresholds met"
+    else:
+        color, head = "concern", f"Caution: only {met} of {total} thresholds met"
+    out.append(("✅", color,
+        f"<b>{head}.</b><br><span style='color:#475569; font-size:11px;'>{'<br>'.join(lines)}</span>"
+        f"<br><span style='font-size:11px; color:#64748b;'>Standard thresholds. Final decision is the oncologist's.</span>"))
+    return out
+
+
+# ---- U4. Bilirubin Direct Fraction ----
+def insight_bili_fraction():
+    out = []
+    tot = get_latest('Bilirubin - Total')
+    direct = get_latest('Bilirubin - Direct')
+    if not (tot and direct) or tot['value'] == 0: return out
+    frac = direct['value'] / tot['value'] * 100
+    if frac > 50:
+        pattern, color = "post-hepatic / obstructive", "watching"
+        note = "Consistent with biliary obstruction (cholangiocarcinoma, PTBD, stent presence)."
+    elif frac > 30:
+        pattern, color = "mixed", "stable"
+        note = "Mixed bilirubin pattern — could be hepatocellular + biliary."
+    else:
+        pattern, color = "pre-hepatic / hemolytic", "stable"
+        note = "Indirect bilirubin dominant — usually hemolysis or Gilbert's syndrome."
+    out.append(("🫧", color,
+        f"<b>Direct Bilirubin fraction: {frac:.0f}%</b> ({direct['value']} / {tot['value']}). "
+        f"Pattern: <b>{pattern}</b>. {note}"))
+    return out
+
+
+# ---- U5. Cholangitis / stent dysfunction watch ----
+def insight_cholangitis_watch():
+    out = []
+    # Need recent trajectories for Bili, ALP, CRP, WBC
+    targets = ['Bilirubin - Total', 'Alkaline Phosphatase (ALP)', 'CRP', 'WBC / Total Leukocyte Count']
+    if not all(_has(n) for n in targets): return out
+    flags = []; signals = 0
+    for n in targets:
+        s = _series_asc(n)
+        if len(s) < 2: continue
+        latest = float(s.iloc[-1]['value'])
+        prev = float(s.iloc[-2]['value'])
+        if prev == 0: continue
+        change = (latest - prev) / prev * 100
+        p = _p_row(n)
+        # Watch for: rising > 20% AND latest above range
+        if change > 20 and pd.notna(p['hi']) and latest > p['hi']:
+            flags.append(f"{n} rising ({change:.0f}%) and above range")
+            signals += 1
+        elif change > 30:
+            flags.append(f"{n} rising sharply ({change:.0f}%)")
+            signals += 1
+    if signals >= 3:
+        text = (f"<b>⚠ Active stent-dysfunction / cholangitis pattern.</b> "
+                f"Multiple markers worsening together: {'; '.join(flags)}. "
+                f"This pattern in a stented patient warrants urgent oncology contact.")
+        color = "concern"
+    elif signals >= 1:
+        text = (f"<b>Partial signal.</b> {'; '.join(flags)}. "
+                f"Monitor next reading; not the full classic cholangitis pattern yet.")
+        color = "watching"
+    else:
+        text = (f"<b>No active signal.</b> "
+                f"Classic cholangitis/stent occlusion pattern (rising Bili + ALP + CRP + WBC together) is not present. "
+                f"Chronic low-grade CRP in stented patients is common; worth discussing with oncologist as chronic context, "
+                f"not acute alarm.")
+        color = "stable"
+    out.append(("🚨", color, text))
+    return out
+
+
+# ---- U6. CIPI — Cancer Inflammation Prognostic Index ----
+def insight_cipi():
+    out = []
+    crp = get_latest('CRP')
+    anc = get_latest('Absolute Neutrophil Count')
+    alc = get_latest('Absolute Lymphocyte Count')
+    if not (crp and anc and alc) or alc['value'] == 0: return out
+    nlr = anc['value'] / alc['value']
+    cipi = crp['value'] * nlr
+    if cipi < 15:
+        band, color = "favorable", "improving"
+    elif cipi < 30:
+        band, color = "intermediate", "watching"
+    else:
+        band, color = "unfavorable", "concern"
+    out.append(("🧪", color,
+        f"<b>CIPI: {cipi:.1f}</b> — {band}. CRP {crp['value']:.1f} × NLR {nlr:.2f}. "
+        f"Combines acute inflammation and immune-to-inflammation balance. "
+        f"In GI cancer studies, CIPI <15 favorable, >30 unfavorable."))
+    return out
+
+
+# ---- U7. PNI recovery trajectory ----
+def insight_pni_trajectory():
+    out = []
+    alb_s = _series_asc('Albumin')
+    alc_s = _series_asc('Absolute Lymphocyte Count')
+    if alb_s.empty or alc_s.empty: return out
+    # Build per-date PNI where both available
+    merged = pd.merge(
+        alb_s[['test_date', 'value']].rename(columns={'value': 'alb'}),
+        alc_s[['test_date', 'value']].rename(columns={'value': 'alc'}),
+        on='test_date'
+    )
+    if len(merged) < 3: return out
+    merged['pni'] = 10 * merged['alb'].astype(float) + 0.005 * merged['alc'].astype(float) * 1000
+    latest = merged.iloc[-1]
+    # Find lowest in the recent 6 months
+    cutoff = max(merged['test_date']) - pd.Timedelta(days=180)
+    recent = merged[merged['test_date'] >= cutoff]
+    low = recent.loc[recent['pni'].idxmin()]
+    days_since_low = (latest['test_date'] - low['test_date']).days
+    delta = latest['pni'] - low['pni']
+    if days_since_low == 0 or delta <= 0:
+        text = (f"<b>PNI: {latest['pni']:.1f}</b> currently — recent 6-month nadir is today's value or older. "
+                f"Watch next reading to confirm direction.")
+        color = "watching"
+    else:
+        direction = "rebound" if delta > 5 else "small recovery" if delta > 2 else "flat"
+        color = "improving" if delta > 5 else "stable"
+        text = (f"<b>PNI {direction}: +{delta:.1f} points in {days_since_low} days</b> "
+                f"(low {low['pni']:.1f} on {low['test_date'].strftime('%d-%b-%Y')} → "
+                f"current {latest['pni']:.1f} on {latest['test_date'].strftime('%d-%b-%Y')}). "
+                f"Body is rebuilding nutritional + immune reserve for next treatment cycle.")
+    out.append(("📈", color, text))
+    return out
+
+
+# ---- U8. Cytopenia nadir tracker ----
+def insight_nadir_tracker():
+    out = []
+    lines = []
+    flags = 0
+    for name, label in [
+        ('Platelet Count', 'Platelet'),
+        ('Absolute Neutrophil Count', 'ANC'),
+        ('Hemoglobin (Hb)', 'Hemoglobin'),
+    ]:
+        s = _series_asc(name)
+        if len(s) < 6: continue
+        recent_window = s.tail(6)  # ~ last ~6 readings ≈ recent cycle
+        prior_window = s.iloc[-12:-6] if len(s) >= 12 else None
+        if prior_window is None or prior_window.empty: continue
+        recent_nadir = float(recent_window['value'].min())
+        prior_nadir = float(prior_window['value'].min())
+        if prior_nadir == 0: continue
+        change = (recent_nadir - prior_nadir) / prior_nadir * 100
+        mult = display_info(_p_row(name))[0]
+        nrecent = fmt_num(recent_nadir, mult); nprior = fmt_num(prior_nadir, mult)
+        if change < -15:  # deeper drop (worse)
+            lines.append(f"🔴 {label} nadir: {nrecent} (down {abs(change):.0f}% from prior cycle nadir {nprior})")
+            flags += 1
+        elif change > 15:  # improving
+            lines.append(f"🟢 {label} nadir: {nrecent} (up {change:.0f}% from prior cycle nadir {nprior})")
+        else:
+            lines.append(f"🟡 {label} nadir: {nrecent} (stable; prior was {nprior})")
+    if not lines: return out
+    if flags >= 2:
+        head, color = "Cumulative bone marrow toxicity emerging", "concern"
+    elif flags == 1:
+        head, color = "One lineage deepening", "watching"
+    else:
+        head, color = "Bone marrow tolerating treatment", "stable"
+    out.append(("📊", color,
+        f"<b>{head}.</b><br><span style='color:#475569; font-size:11px;'>{'<br>'.join(lines)}</span>"))
+    return out
+
+
+# ============================================================================
 # Helpers — defined BEFORE tabs so they're available when overview renders
 # ============================================================================
 def _build_figure(name, p_row, df, mult, unit, height=320, label_textsize=10):
@@ -1274,13 +1583,9 @@ with tab_overview:
             ("Persistence patterns",          insight_streaks()),
             ("Liver injury pattern",          insight_liver_pattern()),
             ("Rate of change",                insight_velocity()),
-            ("CA 19-9 trajectory",            insight_ca199_trajectory()),
-            ("Cancer prognostic scores",      insight_mgps() + insight_pni() + insight_car() + insight_sii()),
-            ("Other composite scores",        insight_composite_scores()),
             ("Time since events",             insight_time_since()),
             ("Markers moving together",       insight_clusters()),
             ("Anemia classification",         insight_anemia()),
-            ("Cachexia / nutrition risk",     insight_cachexia()),
             ("Fatigue cause analysis",        insight_fatigue()),
             ("Electrolyte balance",           insight_electrolytes()),
         ]
@@ -1300,6 +1605,51 @@ with tab_overview:
                                 border_color = color_map.get(color_class, "#94a3b8")
                                 st.markdown(
                                     f"<div style='font-size:13px; line-height:1.5; padding:6px 10px; margin:6px 0; border-left:3px solid {border_color}; background:#fff; border-radius:0 6px 6px 0;'>"
+                                    f"<span style='margin-right:6px;'>{icon}</span>{text}"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+
+    # ===== Unique Insights (cancer + cholangiocarcinoma-specific scores) =====
+    with st.expander("⭐ Unique Insights — cancer & cholangiocarcinoma-specific scores", expanded=True):
+        st.caption("Validated oncology scores and patterns specific to biliary cancer management. Not a replacement for the treating oncologist's clinical judgment.")
+        unique_groups = [
+            # Liver function severity scores
+            ("Liver Function Scores (ALBI + MELD-Na)", insight_albi() + insight_meldna()),
+            # Cancer prognostic ratios — all validated in oncology literature
+            ("Cancer Prognostic Scores (mGPS · PNI · CAR · SII · CIPI · NLR · PLR)",
+                insight_mgps() + insight_pni() + insight_car() + insight_sii()
+                + insight_cipi() + insight_nlr() + insight_plr()),
+            ("CA 19-9 Trajectory",            insight_ca199_trajectory()),
+            ("CTCAE Chemo Toxicity",          insight_ctcae()),
+            ("Pre-Chemo Readiness",           insight_chemo_ready()),
+            ("Bilirubin Direct Fraction",     insight_bili_fraction()),
+            ("Cholangitis / Stent Watch",     insight_cholangitis_watch()),
+            ("PNI Recovery Trajectory",       insight_pni_trajectory()),
+            ("Cytopenia Nadir Tracker",       insight_nadir_tracker()),
+            ("Cachexia / Nutrition Risk",     insight_cachexia()),
+        ]
+        unique_groups = [(t, items) for t, items in unique_groups if items]
+        if not unique_groups:
+            st.info("Not enough data yet to compute the cancer-specific scores.")
+        else:
+            for i in range(0, len(unique_groups), 2):
+                row = unique_groups[i:i+2]
+                cols = st.columns(len(row))
+                for col, (title, items) in zip(cols, row):
+                    with col:
+                        with st.container(border=True):
+                            st.markdown(
+                                f"<div style='font-size:12px; font-weight:800; text-transform:uppercase; "
+                                f"letter-spacing:.5px; color:#7c3aed; margin-bottom:8px;'>{title}</div>",
+                                unsafe_allow_html=True,
+                            )
+                            for icon, color_class, text in items:
+                                color_map = {"improving":"#15803d", "stable":"#475569", "watching":"#b45309", "concern":"#b91c1c"}
+                                border_color = color_map.get(color_class, "#94a3b8")
+                                st.markdown(
+                                    f"<div style='font-size:13px; line-height:1.5; padding:6px 10px; margin:6px 0; "
+                                    f"border-left:3px solid {border_color}; background:#fff; border-radius:0 6px 6px 0;'>"
                                     f"<span style='margin-right:6px;'>{icon}</span>{text}"
                                     f"</div>",
                                     unsafe_allow_html=True,
