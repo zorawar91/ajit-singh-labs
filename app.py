@@ -987,13 +987,15 @@ def insight_ca199_trajectory():
     return out
 
 
-# ---- 14. Cachexia risk ----
+# ---- 14. Cachexia risk (Fearon 2011 criteria — labs + weight trend) ----
 def insight_cachexia():
     out = []
     alb = get_latest('Albumin')
     tp = get_latest('Total Protein')
     ag = get_latest('A/G Ratio')
     if not alb: return out
+
+    # ---- Lab-based flags ----
     flags = []
     if alb['value'] < 3.5:
         flags.append(f"Albumin low ({alb['value']:.1f} g/dL)")
@@ -1001,21 +1003,110 @@ def insight_cachexia():
         flags.append(f"Total Protein low ({tp['value']:.1f} g/dL)")
     if ag and ag['value'] < 1.0:
         flags.append(f"A/G ratio low ({ag['value']:.2f})")
+
+    # ---- Weight-based Fearon criteria ----
+    w_series = _series_asc('Weight')
+    weight_narrative = ""
+    fearon_triggered = False
+    if not w_series.empty:
+        latest_w = float(w_series.iloc[-1]["value"])
+        latest_d = w_series.iloc[-1]["test_date"]
+        earliest_w = float(w_series.iloc[0]["value"])
+        earliest_d = w_series.iloc[0]["test_date"]
+        # Nadir (lowest weight over period)
+        nadir_v = float(w_series["value"].min())
+        nadir_d = w_series.loc[w_series["value"].astype(float).idxmin(), "test_date"]
+
+        # Look for a "6-months-ago" reference reading
+        six_mo_ago = latest_d - pd.Timedelta(days=180)
+        older = w_series[w_series["test_date"] <= six_mo_ago]
+        if not older.empty:
+            ref_w = float(older.iloc[-1]["value"])
+            ref_d = older.iloc[-1]["test_date"]
+            pct_change_6mo = (latest_w - ref_w) / ref_w * 100
+            if pct_change_6mo < -5:
+                fearon_triggered = True
+                flags.append(f"Weight loss {abs(pct_change_6mo):.1f}% over 6 months (Fearon criterion for cachexia)")
+        # Short-term trend within available data
+        recent_change = (latest_w - earliest_w) / earliest_w * 100 if earliest_w > 0 else 0
+        recent_from_nadir = (latest_w - nadir_v) / nadir_v * 100 if nadir_v > 0 else 0
+        arrow = "↑" if recent_change > 0.5 else "↓" if recent_change < -0.5 else "→"
+        weight_narrative = (
+            f"<br><span style='color:#475569; font-size:11px;'>"
+            f"Weight: {latest_w:.1f} kg on {latest_d.strftime('%d-%b-%Y')} "
+            f"({arrow} {recent_change:+.1f}% from {earliest_w:.1f} kg on {earliest_d.strftime('%d-%b-%Y')}). "
+            f"Nadir: {nadir_v:.1f} kg on {nadir_d.strftime('%d-%b-%Y')}; recovered {recent_from_nadir:+.1f}% since."
+            f"</span>"
+        )
+
     n = len(flags)
-    if n == 0:
+    if fearon_triggered or n >= 2:
+        text = (f"<b>Cachexia risk: Elevated.</b> Flags: {'; '.join(flags)}. "
+                f"Consider nutritional support consultation.{weight_narrative}")
+        color = "concern"
+    elif n == 1:
+        text = f"<b>Cachexia risk: Moderate.</b> Flag: {flags[0]}.{weight_narrative}"
+        color = "watching"
+    elif w_series.empty:
         tp_str = f", Total Protein {tp['value']:.1f}" if tp else ""
         ag_str = f", A/G {ag['value']:.2f}" if ag else ""
         text = (f"<b>Cachexia risk: Low.</b> Nutrition surrogates stable — "
                 f"Albumin {alb['value']:.1f}{tp_str}{ag_str}. "
                 f"Add monthly weight to the tracker for a fuller picture.")
         color = "improving"
-    elif n == 1:
-        text = f"<b>Cachexia risk: Moderate.</b> Flag: {flags[0]}. Worth tracking weight + dietary intake."
-        color = "watching"
     else:
-        text = f"<b>Cachexia risk: Elevated.</b> Flags: {'; '.join(flags)}. Consider nutritional support consultation."
-        color = "concern"
+        tp_str = f", Total Protein {tp['value']:.1f}" if tp else ""
+        ag_str = f", A/G {ag['value']:.2f}" if ag else ""
+        text = (f"<b>Cachexia risk: Low.</b> Nutrition surrogates stable — "
+                f"Albumin {alb['value']:.1f}{tp_str}{ag_str}. {weight_narrative}")
+        color = "improving"
     out.append(("🍎", color, text))
+    return out
+
+
+# ---- 14b. Nutritional Risk Index (Buzby 1988) — needs usual weight from secrets ----
+def insight_nri():
+    out = []
+    alb = get_latest('Albumin')
+    w_series = _series_asc('Weight')
+    usual_wt = st.secrets.get("usual_weight_kg")
+
+    if w_series.empty or not alb:
+        return out  # need both weight and albumin
+
+    latest_w = float(w_series.iloc[-1]["value"])
+
+    if usual_wt is None:
+        out.append(("📏", "watching",
+            f"<b>NRI not computed — usual/pre-illness weight unknown.</b> "
+            f"Add <code>usual_weight_kg = XX</code> to Streamlit secrets to enable this score. "
+            f"Latest weight: {latest_w:.1f} kg; Albumin: {alb['value']:.1f} g/dL."))
+        return out
+
+    try:
+        usual_wt = float(usual_wt)
+    except (TypeError, ValueError):
+        return out
+
+    alb_gL = alb['value'] * 10  # g/dL → g/L
+    ratio = latest_w / usual_wt if usual_wt > 0 else 1
+    nri = 1.519 * alb_gL + 41.7 * ratio
+
+    if nri > 100:
+        band, color = "well nourished", "improving"
+    elif nri > 97.5:
+        band, color = "mildly malnourished", "watching"
+    elif nri > 83.5:
+        band, color = "moderately malnourished", "watching"
+    else:
+        band, color = "severely malnourished", "concern"
+
+    pct_change = (latest_w - usual_wt) / usual_wt * 100
+    out.append(("📏", color,
+        f"<b>NRI: {nri:.1f}</b> — {band}. "
+        f"Buzby's Nutritional Risk Index = 1.519 × Albumin(g/L) + 41.7 × (current wt / usual wt). "
+        f"Current weight {latest_w:.1f} kg vs usual {usual_wt:.1f} kg ({pct_change:+.1f}%); Albumin {alb['value']:.1f} g/dL. "
+        f"Bands: >100 well · 97.5–100 mild · 83.5–97.5 moderate · <83.5 severe."))
     return out
 
 
@@ -1627,7 +1718,7 @@ with tab_overview:
             ("Cholangitis / Stent Watch",     insight_cholangitis_watch()),
             ("PNI Recovery Trajectory",       insight_pni_trajectory()),
             ("Cytopenia Nadir Tracker",       insight_nadir_tracker()),
-            ("Cachexia / Nutrition Risk",     insight_cachexia()),
+            ("Cachexia / Nutrition Risk",     insight_cachexia() + insight_nri()),
         ]
         unique_groups = [(t, items) for t, items in unique_groups if items]
         if not unique_groups:
