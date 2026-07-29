@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Never introduce a new Python dependency — the four packages in `requirements.txt` are sufficient for everything in this plan.
+- Never introduce a new RUNTIME Python dependency — the four packages already in `requirements.txt` (streamlit, psycopg, pandas, plotly) are sufficient for every app-facing behavior in this plan. `pytest` (Task 2) is the sole exception: a dev/test-only dependency needed to run Task 1's unit tests, never imported by `app.py` itself.
 - Never touch `.streamlit/secrets.toml` or any real patient data — every code example in this plan uses fictional placeholder values, matching the Superdesign drafts.
 - Keep every `insight_*()` / `build_watch()` scoring function's signature and return contract (`(icon, color_class, html_text)` tuples) exactly as-is — this plan re-groups their OUTPUT into new card layouts, it does not rewrite the scoring logic.
 - Keep the password gate (`check_password()`, `app.py:222-245`) and `load_data()` (`app.py:250-274`) untouched — only their surrounding chrome changes.
