@@ -23,6 +23,7 @@ import streamlit.components.v1 as components
 import psycopg
 import pandas as pd
 import plotly.graph_objects as go
+import labtracker_lib as lib
 
 # ============================================================================
 # Page config
@@ -234,6 +235,58 @@ def check_password() -> bool:
     return False
 
 
+def render_header():
+    """Persistent dark header: brand, unified period control, Family/Clinical
+    toggle, and Lock. Uses st.container(key=...) so the wrapping element gets
+    a stable `st-key-app_header` CSS class we can style dark (see the CSS
+    block below) — this is the standard way to give a Streamlit container a
+    targetable class without relying on brittle structural selectors."""
+    st.markdown("""
+    <style>
+      .st-key-app_header {
+        background: #0f172a; border-radius: 10px; padding: 10px 20px; margin-bottom: 20px;
+      }
+      .st-key-app_header * { color: #f1f5f9 !important; }
+      .st-key-app_header [data-testid="stMarkdownContainer"] p { margin: 0; }
+      .st-key-app_header button {
+        background: #1e293b !important; border-color: #334155 !important;
+      }
+      .st-key-app_header button:hover { background: #2563eb !important; border-color: #2563eb !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.session_state.setdefault("global_period", "ALL")
+    st.session_state.setdefault("view_mode", "Clinical View")
+
+    with st.container(key="app_header"):
+        col_brand, col_period, col_view, col_lock = st.columns([4, 3, 2, 1], vertical_alignment="center")
+        with col_brand:
+            st.markdown(
+                f"""<div style="display:flex; align-items:center; gap:10px;">
+                  <span style="font-size:22px;">{lib.ICONS['lucide:test-tube-2']}</span>
+                  <div>
+                    <div style="font-size:13px; font-weight:700; letter-spacing:.02em; text-transform:uppercase;">{APP_TITLE}</div>
+                    <div style="font-size:10px; opacity:.7;">Clinical Monitoring • {PATIENT_NAME}</div>
+                  </div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+        with col_period:
+            st.segmented_control(
+                "Period", lib.PERIOD_OPTIONS, default="ALL",
+                key="global_period", label_visibility="collapsed",
+            )
+        with col_view:
+            st.segmented_control(
+                "View", ["Family", "Clinical View"], default="Clinical View",
+                key="view_mode", label_visibility="collapsed",
+            )
+        with col_lock:
+            if st.button(f"{lib.ICONS['lucide:log-out']} Lock", key="lock_btn", use_container_width=True):
+                st.session_state["authenticated"] = False
+                st.rerun()
+
+
 if not check_password():
     st.stop()
 
@@ -343,8 +396,7 @@ def get_previous(param_name, before_date):
 # ============================================================================
 # Header
 # ============================================================================
-st.markdown(f"## {APP_TITLE} — {PATIENT_NAME}")
-st.caption(meta.get("subtitle", ""))
+render_header()
 
 # Patient banner
 latest_date = ALL_DATES[0] if ALL_DATES else None
