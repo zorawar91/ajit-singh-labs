@@ -1656,7 +1656,7 @@ def _build_figure(name, p_row, df, mult, unit, height=320, label_textsize=10):
         margin=dict(l=10, r=20, t=20, b=10), height=height,
         showlegend=False, hovermode="x unified",
         plot_bgcolor="white", paper_bgcolor="white",
-        font=dict(size=12, color="#0f172a"),
+        font=dict(size=12, color="#0f172a", family="Plus Jakarta Sans, -apple-system, sans-serif"),
         xaxis=dict(showgrid=False, tickfont=dict(size=11), nticks=8),
         yaxis=dict(gridcolor="rgba(0,0,0,0.06)", tickfont=dict(size=11), title_font=dict(size=12)),
     )
@@ -1692,14 +1692,17 @@ def expand_chart_dialog(name):
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"modal_chart_{name}")
 
 
-def render_chart(name, period_days=None, key_prefix="chart"):
+def render_chart(name, key_prefix="chart", period_days=None):
     if not (params_df["name"] == name).any():
         st.info(f"Parameter '{name}' not found")
         return
     p_row = params_df[params_df["name"] == name].iloc[0]
     df = get_readings(name)
-    if period_days is not None and not df.empty:
-        cutoff = max(df["test_date"]) - pd.Timedelta(days=period_days)
+    effective_period_days = period_days if period_days is not None else lib.period_days_for(
+        st.session_state.get("global_period", "ALL")
+    )
+    if effective_period_days is not None and not df.empty:
+        cutoff = max(df["test_date"]) - pd.Timedelta(days=effective_period_days)
         df = df[df["test_date"] >= cutoff]
     if df.empty:
         with st.container(border=True):
