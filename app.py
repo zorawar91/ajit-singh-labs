@@ -212,6 +212,23 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
+# Callbacks for header widget state management
+# ============================================================================
+def _keep_period():
+    """Callback to restore global_period to default if deselected to None.
+    Runs at the start of the rerun, before widgets are instantiated."""
+    if st.session_state.get("global_period") is None:
+        st.session_state["global_period"] = "ALL"
+
+
+def _keep_view():
+    """Callback to restore view_mode to default if deselected to None.
+    Runs at the start of the rerun, before widgets are instantiated."""
+    if st.session_state.get("view_mode") is None:
+        st.session_state["view_mode"] = "Clinical View"
+
+
+# ============================================================================
 # Auth — single shared password
 # ============================================================================
 def check_password() -> bool:
@@ -276,23 +293,18 @@ def render_header():
             st.segmented_control(
                 "Period", lib.PERIOD_OPTIONS, default="ALL",
                 key="global_period", label_visibility="collapsed",
+                on_change=_keep_period,
             )
         with col_view:
             st.segmented_control(
                 "View", ["Family", "Clinical View"], default="Clinical View",
                 key="view_mode", label_visibility="collapsed",
+                on_change=_keep_view,
             )
         with col_lock:
             if st.button(f"{lib.ICONS['lucide:log-out']} Lock", key="lock_btn", use_container_width=True):
                 st.session_state["authenticated"] = False
                 st.rerun()
-
-        # segmented_control allows deselecting the active pill, which sets the
-        # value to None; later pages require a real bucket, so restore the default.
-        if st.session_state.get("global_period") is None:
-            st.session_state["global_period"] = "ALL"
-        if st.session_state.get("view_mode") is None:
-            st.session_state["view_mode"] = "Clinical View"
 
 
 if not check_password():
