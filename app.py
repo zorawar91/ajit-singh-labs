@@ -23,6 +23,7 @@ import streamlit.components.v1 as components
 import psycopg
 import pandas as pd
 import plotly.graph_objects as go
+
 import labtracker_lib as lib
 
 # ============================================================================
@@ -285,6 +286,13 @@ def render_header():
             if st.button(f"{lib.ICONS['lucide:log-out']} Lock", key="lock_btn", use_container_width=True):
                 st.session_state["authenticated"] = False
                 st.rerun()
+
+        # segmented_control allows deselecting the active pill, which sets the
+        # value to None; later pages require a real bucket, so restore the default.
+        if st.session_state.get("global_period") is None:
+            st.session_state["global_period"] = "ALL"
+        if st.session_state.get("view_mode") is None:
+            st.session_state["view_mode"] = "Clinical View"
 
 
 if not check_password():
