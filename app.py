@@ -105,7 +105,7 @@ st.set_page_config(
     page_title=f"{APP_TITLE} — {PATIENT_NAME}",
     page_icon="🧪",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # Inject meta description + Open Graph tags into the document <head>.
@@ -305,6 +305,55 @@ def render_header():
             if st.button(f"{lib.ICONS['lucide:log-out']} Lock", key="lock_btn", use_container_width=True):
                 st.session_state["authenticated"] = False
                 st.rerun()
+
+
+def render_sidebar_nav() -> str:
+    """Left sidebar nav replacing the old 5-tab bar. Buttons (not st.radio)
+    because each button's active/inactive background is set with an exact
+    hex value we already know in Python — no brittle :checked CSS needed."""
+    st.session_state.setdefault("nav_page", "overview")
+
+    with st.sidebar:
+        st.markdown("""
+        <style>
+          [data-testid="stSidebar"] button {
+            justify-content: flex-start !important; text-align: left !important;
+            border: none !important; background: transparent !important;
+            font-weight: 500 !important; padding: 10px 12px !important;
+          }
+          [data-testid="stSidebar"] button:hover { background: #f8fafc !important; }
+        </style>
+        """, unsafe_allow_html=True)
+
+        for item in lib.NAV_ITEMS:
+            is_active = st.session_state["nav_page"] == item.slug
+            if is_active:
+                st.markdown(f"""
+                <style>
+                .st-key-nav_{item.slug} button {{
+                  background: #eff6ff !important; color: #2563eb !important;
+                  border-right: 3px solid #2563eb !important; font-weight: 600 !important;
+                }}
+                </style>
+                """, unsafe_allow_html=True)
+            if st.button(f"{item.icon}  {item.label}", key=f"nav_{item.slug}", use_container_width=True):
+                st.session_state["nav_page"] = item.slug
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("""
+        <div style="background:#f8fafc; border-radius:8px; padding:12px;">
+          <div style="font-size:10px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Alert Thresholds</div>
+          <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:6px;">
+            <span style="color:#64748b;">Platelets</span><span style="font-weight:700; color:#dc2626;">&lt; 50k</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:11px;">
+            <span style="color:#64748b;">Neutrophils</span><span style="font-weight:700; color:#dc2626;">&lt; 0.5k</span>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    return st.session_state["nav_page"]
 
 
 if not check_password():
@@ -1705,12 +1754,10 @@ def render_chart(name, period_days=None, key_prefix="chart"):
 # ============================================================================
 # Tabs
 # ============================================================================
-tab_overview, tab_trends, tab_overlay, tab_compare, tab_table = st.tabs(
-    ["Overview", "Trends", "Compare Trends", "Compare Dates", "Full Table"]
-)
+active_page = render_sidebar_nav()
 
 # -------- Overview tab --------
-with tab_overview:
+if active_page == "overview":
     # ===== Clinical Watch =====
     with st.expander("🔍 Clinical Watch — automated summary across recent readings", expanded=True):
         st.caption("Discuss specifics with the treating oncologist.")
@@ -1869,7 +1916,7 @@ with tab_overview:
 
 
 # -------- Trends tab --------
-with tab_trends:
+if active_page == "trends":
     col1, col2, col3 = st.columns([2, 2, 1])
     panel_filter = col1.selectbox("Panel", ["All panels"] + PANELS, key="tr_panel")
     param_options = ["All charted parameters"] + sorted(params_df["name"].tolist())
@@ -1902,7 +1949,7 @@ with tab_trends:
 
 
 # -------- Multi-Param overlay tab --------
-with tab_overlay:
+if active_page == "compare":
     st.markdown("### Compare Trends Across Parameters")
     st.caption(
         "Overlay up to 5 lab parameters on one chart to see how they move together. "
@@ -2029,7 +2076,7 @@ with tab_overlay:
 
 
 # -------- Compare Dates tab --------
-with tab_compare:
+if active_page == "compare":
     date_options = [d.strftime("%d-%b-%Y") for d in ALL_DATES]
     iso_map = {d.strftime("%d-%b-%Y"): d for d in ALL_DATES}
     col1, col2, col3 = st.columns([2, 2, 2])
@@ -2076,7 +2123,7 @@ with tab_compare:
 
 
 # -------- Full Table tab --------
-with tab_table:
+if active_page == "records":
     col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
     panel_t = col1.selectbox("Panel", ["All"] + PANELS, key="tbl_panel")
     search = col2.text_input("Search parameter", "", key="tbl_search")
