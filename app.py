@@ -138,72 +138,50 @@ components.html(f"""
 
 # Tighter spacing + louder status colors
 st.markdown("""
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
-  .block-container { padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1500px; }
-  h1, h2, h3 { font-weight: 600; }
-  /* All Streamlit bordered containers get a soft light-grey look */
+  html, .stApp { background-color: #f8fafc; }
+  body, [class*="css"] { font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; }
+  h1, h2, h3, h4 { font-family: 'Outfit', sans-serif; letter-spacing: -0.02em; }
+  .font-mono-lab { font-family: 'JetBrains Mono', monospace; }
+
+  .block-container { padding-top: 1rem; padding-bottom: 3rem; max-width: 1500px; }
+
+  /* Every bordered Streamlit container (st.container(border=True)) becomes
+     a "clinical-card": white surface, light border, small radius+shadow. */
   div[data-testid="stVerticalBlockBorderWrapper"] {
-    background: #f8fafc !important;
+    background: #ffffff !important;
     border: 1px solid #e2e8f0 !important;
-    border-radius: 12px !important;
-    padding: 14px 16px !important;
-    height: 100% !important;  /* stretch to fill the column height */
+    border-radius: 8px !important;
+    padding: 16px 20px !important;
+    box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05) !important;
+    height: 100% !important;
     display: flex !important;
     flex-direction: column !important;
   }
-  /* Make every column stretch its child to the row's tallest sibling */
-  div[data-testid="column"] {
-    display: flex !important;
-    flex-direction: column !important;
-  }
+  div[data-testid="column"] { display: flex !important; flex-direction: column !important; }
   div[data-testid="column"] > div { flex: 1 1 auto; }
-  div[data-testid="column"] > div > div[data-testid="stVerticalBlock"] {
-    height: 100%;
-  }
-  /* Reserve consistent space for the description so cards align */
-  .param-desc { min-height: 2.8em; }
-  .param-meta { min-height: 1.2em; }
-  .trend-line { min-height: 1.4em; }
-  /* LOUDER status colors */
-  .pill-high  { background: #fee2e2; color: #b91c1c; font-weight: 800; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; border: 1.5px solid #ef4444; }
-  .pill-low   { background: #fef3c7; color: #b45309; font-weight: 800; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; border: 1.5px solid #f59e0b; }
-  .pill-normal{ background: #dcfce7; color: #15803d; font-weight: 800; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; border: 1.5px solid #22c55e; }
-  /* Stronger metric value colors when red/green */
-  div[data-testid="stMetricValue"] { font-size: 26px; font-weight: 700; }
-  div[data-testid="stMetricDelta"] { font-weight: 700; font-size: 13px; }
-  /* Card header row */
-  .param-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
-  .param-name { font-weight: 700; font-size: 14px; color: #0f172a; }
-  .param-help-icon { color: #64748b; font-size: 13px; cursor: help; }
-  .param-desc { font-size: 11px; color: #475569; font-style: italic; line-height: 1.4; margin-top: 2px; }
-  .param-meta { font-size: 11px; color: #64748b; margin-top: 4px; }
-  .big-value { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; margin: 4px 0; }
-  .big-value.high   { color: #b91c1c; }
-  .big-value.low    { color: #b45309; }
-  .big-value.normal { color: #15803d; }
-  .trend-line { font-size: 12px; color: #475569; margin-top: 4px; }
+  div[data-testid="column"] > div > div[data-testid="stVerticalBlock"] { height: 100%; }
+
+  .param-desc { min-height: 2.8em; font-size: 11px; color: #475569; font-style: italic; line-height: 1.4; margin-top: 2px; }
+  .param-meta { min-height: 1.2em; font-size: 11px; color: #64748b; margin-top: 4px; }
+  .trend-line { min-height: 1.4em; font-size: 12px; color: #475569; margin-top: 4px; }
   .trend-line .up   { color: #b91c1c; font-weight: 700; }
   .trend-line .down { color: #15803d; font-weight: 700; }
   .trend-line .flat { color: #64748b; font-weight: 700; }
-  /* Watch cards */
-  .watch-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; border-top: 4px solid #cbd5e1; height: 100%; }
-  .watch-card.improving { border-top-color: #22c55e; }
-  .watch-card.stable    { border-top-color: #94a3b8; }
-  .watch-card.watching  { border-top-color: #f59e0b; }
-  .watch-card.concern   { border-top-color: #ef4444; }
-  .watch-card h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; font-weight: 800; }
-  .watch-card.improving h4 { color: #15803d; }
-  .watch-card.stable    h4 { color: #475569; }
-  .watch-card.watching  h4 { color: #b45309; }
-  .watch-card.concern   h4 { color: #b91c1c; }
-  .watch-item { font-size: 13px; line-height: 1.45; margin: 6px 0; padding-left: 6px; border-left: 2px solid #e2e8f0; }
-  .watch-item b { font-weight: 700; }
-  .watch-item span { color: #475569; display: block; font-size: 12px; margin-top: 2px; }
-  .patient-banner {
-    background: linear-gradient(180deg, #fff, #fafbfd);
-    border: 1px solid #e2e8f0; border-radius: 12px;
-    padding: 16px 20px; margin-bottom: 14px;
-  }
+
+  .pill-high  { background: #fee2e2; color: #b91c1c; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid #ef4444; }
+  .pill-low   { background: #fef3c7; color: #b45309; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid #f59e0b; }
+  .pill-normal{ background: #dcfce7; color: #15803d; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid #22c55e; }
+
+  div[data-testid="stMetricValue"] { font-size: 22px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  div[data-testid="stMetricDelta"] { font-weight: 700; font-size: 13px; }
+
+  .param-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .param-name { font-weight: 700; font-size: 14px; color: #0f172a; }
+
   .alert {
     background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444;
     border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; font-size: 13px;
@@ -211,8 +189,23 @@ st.markdown("""
   .alert .t { font-weight: 800; color: #991b1b; margin-bottom: 4px; }
   .alert .d { line-height: 1.7; }
   .alert .d b { color: #b91c1c; }
-  .stTabs [data-baseweb="tab-list"] { gap: 4px; }
-  .stTabs [data-baseweb="tab"] { padding: 10px 18px; font-weight: 500; }
+
+  /* Full Records table — plain, spacious, minimal color coding (approved
+     in the last design round: no vertical borders, only row separators). */
+  .simple-table { width: 100%; border-collapse: collapse; }
+  .simple-table th {
+    padding: 16px 24px; font-size: 14px; font-weight: 600; color: #334155;
+    background: rgba(248,250,252,0.8); text-align: left; border-bottom: 1px solid #e2e8f0;
+  }
+  .simple-table td {
+    padding: 16px 24px; font-size: 14px; border-bottom: 1px solid #f1f5f9;
+    color: #0f172a; line-height: 1.6;
+  }
+  .simple-table tr:nth-child(odd) { background: rgba(248,250,252,0.3); }
+  .val-normal { color: #059669; font-weight: 600; }
+  .val-alert  { color: #dc2626; font-weight: 600; }
+
+  #MainMenu, footer, header { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
