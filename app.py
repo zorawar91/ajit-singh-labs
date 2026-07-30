@@ -1964,176 +1964,140 @@ if active_page == "trends":
 
 # -------- Multi-Param overlay tab --------
 if active_page == "compare":
-    st.markdown("### Compare Trends Across Parameters")
-    st.caption(
-        "Overlay up to 5 lab parameters on one chart to see how they move together. "
-        "Because parameters have different scales (mg/dL, U/L, /µL, etc.), values are normalized "
-        "to **percent of the upper reference limit** so trends across markers are visually comparable. "
-        "A horizontal line at 100% marks the upper limit; values above the line are out of range."
-    )
-
-    # Pre-selected medically meaningful set for cholangiocarcinoma — adjust freely
-    default_set = [
-        "Bilirubin - Total", "Alkaline Phosphatase (ALP)", "GGT", "CRP", "CA 19-9"
-    ]
-    available = sorted([p for p in params_df["name"].tolist()
-                        if pd.notna(params_df.loc[params_df["name"] == p, "hi"].iloc[0])])
-    default_in_available = [p for p in default_set if p in available]
-
-    col_a, col_b = st.columns([3, 1])
-    with col_a:
-        selected = st.multiselect(
-            "Choose up to 5 parameters",
-            options=available,
-            default=default_in_available,
-            max_selections=5,
-            help="Only parameters with a defined upper reference limit can be normalized.",
-        )
-    with col_b:
-        period_overlay = st.selectbox(
-            "Period",
-            ["All time", "Last 30 days", "Last 90 days", "Last 6 months", "Last 1 year"],
-            key="overlay_period",
+    col_title, col_toggle = st.columns([3, 1])
+    with col_title:
+        st.markdown("## Compare Analytical Data")
+        st.caption("Cross-parameter normalization and longitudinal comparison.")
+    with col_toggle:
+        st.segmented_control(
+            "Mode", ["Overlay Trends", "By Date"], default="Overlay Trends",
+            key="compare_mode", label_visibility="collapsed",
         )
 
-    if not selected:
-        st.info("Pick at least one parameter from the dropdown.")
-    else:
-        # Color palette — distinct, colorblind-friendly
-        palette = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"]
-        period_days = {
-            "All time": None, "Last 30 days": 30, "Last 90 days": 90,
-            "Last 6 months": 180, "Last 1 year": 365,
-        }[period_overlay]
+    if st.session_state.get("compare_mode", "Overlay Trends") == "Overlay Trends":
+        default_set = ["Bilirubin - Total", "Alkaline Phosphatase (ALP)", "GGT", "CRP", "CA 19-9"]
+        available = sorted([p for p in params_df["name"].tolist()
+                            if pd.notna(params_df.loc[params_df["name"] == p, "hi"].iloc[0])])
+        default_in_available = [p for p in default_set if p in available]
 
-        fig = go.Figure()
-        for i, name in enumerate(selected):
-            p_row = params_df[params_df["name"] == name].iloc[0]
-            df_p = get_readings(name)
-            if period_days is not None and not df_p.empty:
-                cutoff = max(df_p["test_date"]) - pd.Timedelta(days=period_days)
-                df_p = df_p[df_p["test_date"] >= cutoff]
-            if df_p.empty:
+        with st.container(border=True):
+            selected = st.multiselect(
+                "Select parameters (max 5)", options=available,
+                default=default_in_available, max_selections=5,
+                help="Only parameters with a defined upper reference limit can be normalized.",
+            )
+            st.caption("All values normalized to **% of Upper Reference Limit**.")
+
+            if not selected:
+                st.info("Pick at least one parameter from the dropdown.")
+            else:
+                palette = ["#2563eb", "#6366f1", "#10b981", "#f59e0b", "#f43f5e"]
+                period_days = lib.period_days_for(st.session_state.get("global_period", "ALL"))
+
+                fig = go.Figure()
+                for i, name in enumerate(selected):
+                    p_row = params_df[params_df["name"] == name].iloc[0]
+                    df_p = get_readings(name)
+                    if period_days is not None and not df_p.empty:
+                        cutoff = max(df_p["test_date"]) - pd.Timedelta(days=period_days)
+                        df_p = df_p[df_p["test_date"] >= cutoff]
+                    if df_p.empty:
+                        continue
+                    hi = float(p_row["hi"])
+                    unit = p_row["unit"] or ""
+                    df_p = df_p.copy()
+                    df_p["normalized"] = df_p["value"].astype(float) / hi * 100
+                    fig.add_trace(go.Scatter(
+                        x=df_p["test_date"], y=df_p["normalized"],
+                        mode="lines+markers", name=name,
+                        line=dict(color=palette[i], width=2.5),
+                        marker=dict(size=8, color=palette[i], line=dict(width=1, color="#fff")),
+                        customdata=list(zip(df_p["value"].astype(float), [unit] * len(df_p), [hi] * len(df_p))),
+                        hovertemplate=(f"<b>{name}</b><br>%{{x|%d-%b-%Y}}<br>"
+                                       "Value: %{customdata[0]:,.2f} %{customdata[1]}<br>"
+                                       "Upper limit: %{customdata[2]:,.2f} %{customdata[1]}<br>"
+                                       "<b>%{y:.0f}%</b> of upper limit<extra></extra>"),
+                    ))
+                fig.add_hline(y=100, line_dash="dash", line_color="rgba(220,38,38,0.55)",
+                              annotation_text="upper limit (100%)", annotation_position="top right")
+                fig.add_hrect(y0=0, y1=100, fillcolor="rgba(34,197,94,0.05)", line_width=0, layer="below")
+                fig.update_layout(
+                    height=420, margin=dict(l=20, r=20, t=30, b=60),
+                    plot_bgcolor="white", paper_bgcolor="white",
+                    font=dict(size=12, color="#0f172a", family="Plus Jakarta Sans, -apple-system, sans-serif"),
+                    xaxis=dict(showgrid=False, tickfont=dict(size=11), nticks=10),
+                    yaxis=dict(title=dict(text="% of upper reference limit"), gridcolor="rgba(0,0,0,0.06)",
+                               tickfont=dict(size=11), tickformat=".0f", ticksuffix="%"),
+                    hovermode="x unified",
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
+                )
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="overlay_chart")
+
+                st.divider()
+                leg_cols = st.columns(len(selected))
+                for i, name in enumerate(selected):
+                    p_row = params_df[params_df["name"] == name].iloc[0]
+                    mult, unit = display_info(p_row)
+                    latest = get_latest(name)
+                    if latest:
+                        pct_of_hi = latest["value"] / float(p_row["hi"]) * 100 if pd.notna(p_row["hi"]) else None
+                        pct_str = f"{pct_of_hi:.0f}% of limit" if pct_of_hi is not None else ""
+                        with leg_cols[i]:
+                            st.markdown(
+                                f"""<div style="background:#f8fafc; border:1px solid #f1f5f9; border-radius:8px; padding:10px;">
+                                  <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                                    <span style="width:8px; height:8px; border-radius:50%; background:{palette[i]}; display:inline-block;"></span>
+                                    <span style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase;">{name}</span>
+                                  </div>
+                                  <div class="font-mono-lab" style="font-size:16px; font-weight:700;">{fmt_num(latest['value'], mult)} <span style="font-size:10px; color:#94a3b8;">{unit}</span></div>
+                                  <div style="font-size:10px; color:#94a3b8; margin-top:2px;">{pct_str} • Ref: {fmt_range(p_row)}</div>
+                                </div>""",
+                                unsafe_allow_html=True,
+                            )
+    else:  # By Date
+        date_options = [d.strftime("%d-%b-%Y") for d in ALL_DATES]
+        iso_map = {d.strftime("%d-%b-%Y"): d for d in ALL_DATES}
+        col1, col2, col3 = st.columns(3)
+        dA_str = col1.selectbox("Date A", date_options, index=1 if len(date_options) > 1 else 0)
+        dB_str = col2.selectbox("Date B", date_options, index=0)
+        panel_cmp = col3.selectbox("Panel filter", ["All panels"] + PANELS, key="cmp_panel")
+        dA, dB = iso_map[dA_str], iso_map[dB_str]
+        st.caption("Δ shows B − A · red = higher · green = lower")
+
+        sel = params_df.copy()
+        if panel_cmp != "All panels":
+            sel = sel[sel["panel"] == panel_cmp]
+
+        for panel in PANELS:
+            panel_params = sel[sel["panel"] == panel]
+            if panel_params.empty:
                 continue
-            hi = float(p_row["hi"])
-            unit = p_row["unit"] or ""
-            df_p = df_p.copy()
-            df_p["normalized"] = df_p["value"].astype(float) / hi * 100
-            fig.add_trace(go.Scatter(
-                x=df_p["test_date"], y=df_p["normalized"],
-                mode="lines+markers",
-                name=f"{name}",
-                line=dict(color=palette[i], width=2.5),
-                marker=dict(size=8, color=palette[i], line=dict(width=1, color="#fff")),
-                customdata=list(zip(df_p["value"].astype(float), [unit] * len(df_p), [hi] * len(df_p))),
-                hovertemplate=(
-                    f"<b>{name}</b><br>"
-                    "%{x|%d-%b-%Y}<br>"
-                    "Value: %{customdata[0]:,.2f} %{customdata[1]}<br>"
-                    "Upper limit: %{customdata[2]:,.2f} %{customdata[1]}<br>"
-                    "<b>%{y:.0f}%</b> of upper limit"
-                    "<extra></extra>"
-                ),
-            ))
-
-        # Upper limit reference
-        fig.add_hline(
-            y=100, line_dash="dash", line_color="rgba(220,38,38,0.55)",
-            annotation_text="upper limit (100%)", annotation_position="top right",
-            annotation_font_size=11,
-        )
-        # Shaded "normal zone" below 100%
-        fig.add_hrect(y0=0, y1=100, fillcolor="rgba(34,197,94,0.05)", line_width=0, layer="below")
-
-        fig.update_layout(
-            height=520,
-            margin=dict(l=20, r=20, t=30, b=80),
-            plot_bgcolor="white", paper_bgcolor="white",
-            font=dict(size=12, color="#0f172a"),
-            xaxis=dict(showgrid=False, tickfont=dict(size=11), nticks=10),
-            yaxis=dict(
-                title=dict(text="% of upper reference limit", font=dict(size=12)),
-                gridcolor="rgba(0,0,0,0.06)", tickfont=dict(size=11),
-                tickformat=".0f", ticksuffix="%",
-            ),
-            hovermode="x unified",
-            legend=dict(
-                orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5,
-                font=dict(size=11), bgcolor="rgba(0,0,0,0)",
-            ),
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="overlay_chart")
-
-        # Quick clinical-context legend below the chart
-        st.divider()
-        st.markdown("##### What you're seeing")
-        leg_cols = st.columns(len(selected))
-        for i, name in enumerate(selected):
-            p_row = params_df[params_df["name"] == name].iloc[0]
-            mult, unit = display_info(p_row)
-            latest = get_latest(name)
-            if latest:
-                pct_of_hi = latest["value"] / float(p_row["hi"]) * 100 if pd.notna(p_row["hi"]) else None
-                pct_str = f"{pct_of_hi:.0f}% of limit" if pct_of_hi is not None else ""
-                desc = PARAM_INFO.get(name, "")
-                with leg_cols[i]:
-                    with st.container(border=True):
-                        st.markdown(
-                            f"""
-                            <div style="font-weight:700; color:{palette[i]}; font-size:13px;">● {name}</div>
-                            <div style="font-size:18px; font-weight:700; margin:4px 0;">{fmt_num(latest['value'], mult)} {unit}</div>
-                            <div style="font-size:11px; color:#64748b;">{pct_str} · ref {fmt_range(p_row)}</div>
-                            {f'<div style="font-size:11px; color:#475569; font-style:italic; margin-top:6px; line-height:1.4;">{desc}</div>' if desc else ''}
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-
-# -------- Compare Dates tab --------
-if active_page == "compare":
-    date_options = [d.strftime("%d-%b-%Y") for d in ALL_DATES]
-    iso_map = {d.strftime("%d-%b-%Y"): d for d in ALL_DATES}
-    col1, col2, col3 = st.columns([2, 2, 2])
-    dA_str = col1.selectbox("Date A", date_options, index=1 if len(date_options) > 1 else 0)
-    dB_str = col2.selectbox("Date B", date_options, index=0)
-    panel_cmp = col3.selectbox("Panel filter", ["All panels"] + PANELS, key="cmp_panel")
-    dA, dB = iso_map[dA_str], iso_map[dB_str]
-    st.caption(f"Δ shows B – A · red = higher · green = lower")
-
-    sel = params_df.copy()
-    if panel_cmp != "All panels":
-        sel = sel[sel["panel"] == panel_cmp]
-
-    for panel in PANELS:
-        panel_params = sel[sel["panel"] == panel]
-        if panel_params.empty:
-            continue
-        rows = []
-        for _, p in panel_params.iterrows():
-            mult, unit = display_info(p)
-            vA = readings_df[(readings_df["parameter"] == p["name"]) & (readings_df["test_date"] == dA)]["value"]
-            vB = readings_df[(readings_df["parameter"] == p["name"]) & (readings_df["test_date"] == dB)]["value"]
-            vA = float(vA.iloc[0]) if not vA.empty and pd.notna(vA.iloc[0]) else None
-            vB = float(vB.iloc[0]) if not vB.empty and pd.notna(vB.iloc[0]) else None
-            if vA is None and vB is None:
-                continue
-            stA = status_of(p, vA) if vA is not None else "—"
-            stB = status_of(p, vB) if vB is not None else "—"
-            delta = ""
-            if vA is not None and vB is not None and abs(vA - vB) > 0.005:
-                diff = vB - vA
-                arrow = "↑" if diff > 0 else "↓"
-                delta = f"{arrow} {fmt_num(abs(diff), mult)}"
-            rows.append({
-                "Parameter": p["name"],
-                f"{dA_str}": (fmt_num(vA, mult) if vA is not None else "—") + ("" if stA == "normal" or stA == "—" else f" ({stA.upper()})"),
-                f"{dB_str}": (fmt_num(vB, mult) if vB is not None else "—") + ("" if stB == "normal" or stB == "—" else f" ({stB.upper()})"),
-                "Δ (B − A)": delta,
-                "Reference": f"{fmt_range(p)} {unit}",
-            })
-        if rows:
-            st.markdown(f"**{panel}**")
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            rows = []
+            for _, p in panel_params.iterrows():
+                mult, unit = display_info(p)
+                vA = readings_df[(readings_df["parameter"] == p["name"]) & (readings_df["test_date"] == dA)]["value"]
+                vB = readings_df[(readings_df["parameter"] == p["name"]) & (readings_df["test_date"] == dB)]["value"]
+                vA = float(vA.iloc[0]) if not vA.empty and pd.notna(vA.iloc[0]) else None
+                vB = float(vB.iloc[0]) if not vB.empty and pd.notna(vB.iloc[0]) else None
+                if vA is None and vB is None:
+                    continue
+                stA = status_of(p, vA) if vA is not None else "—"
+                stB = status_of(p, vB) if vB is not None else "—"
+                delta = ""
+                if vA is not None and vB is not None and abs(vA - vB) > 0.005:
+                    diff = vB - vA
+                    arrow = "↑" if diff > 0 else "↓"
+                    delta = f"{arrow} {fmt_num(abs(diff), mult)}"
+                rows.append({
+                    "Parameter": p["name"],
+                    f"{dA_str}": (fmt_num(vA, mult) if vA is not None else "—") + ("" if stA in ("normal", "—") else f" ({stA.upper()})"),
+                    f"{dB_str}": (fmt_num(vB, mult) if vB is not None else "—") + ("" if stB in ("normal", "—") else f" ({stB.upper()})"),
+                    "Δ (B − A)": delta,
+                    "Reference": f"{fmt_range(p)} {unit}",
+                })
+            if rows:
+                st.markdown(f"**{panel}**")
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # -------- Full Table tab --------
