@@ -213,6 +213,7 @@ st.markdown("""
 
   #MainMenu, footer { visibility: hidden; }
   [data-testid="stToolbar"] { visibility: hidden; }
+  [data-testid="stExpandSidebarButton"] { visibility: visible; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1917,6 +1918,9 @@ if active_page == "overview":
                     trend_html = f'<div class="trend-line"><span class="{cls}">{arrow} {fmt_num(abs(diff), mult)}</span> vs prior</div>'
                 else:
                     trend_html = '<div class="trend-line"><span class="flat">→ no change</span> vs prior</div>'
+            range_str = fmt_range(p_row)
+            date_str = latest["date"].strftime("%d-%b-%Y")
+            meta_str = f"ref {range_str} &nbsp;·&nbsp; {date_str}" if range_str else date_str
             with col:
                 with st.container(border=True):
                     st.markdown(
@@ -1925,7 +1929,7 @@ if active_page == "overview":
                         {f'<div class="param-desc">{desc}</div>' if desc else ''}
                         <div class="big-value {s} font-mono-lab" style="font-size:26px; font-weight:800; margin:6px 0;">{fmt_num(latest['value'], mult)}
                           <span style="font-size:11px; color:#94a3b8; font-family:'Plus Jakarta Sans',sans-serif;">{unit}</span></div>
-                        <div class="param-meta">ref {fmt_range(p_row)} {unit} &nbsp;·&nbsp; {latest["date"].strftime("%d-%b-%Y")}</div>
+                        <div class="param-meta">{meta_str}</div>
                         {trend_html}""",
                         unsafe_allow_html=True,
                     )
@@ -1985,7 +1989,7 @@ if active_page == "compare":
             on_change=_keep_compare_mode,
         )
 
-    if st.session_state.get("compare_mode") == "Overlay Trends":
+    if (st.session_state.get("compare_mode") or "Overlay Trends") == "Overlay Trends":
         default_set = ["Bilirubin - Total", "Alkaline Phosphatase (ALP)", "GGT", "CRP", "CA 19-9"]
         available = sorted([p for p in params_df["name"].tolist()
                             if pd.notna(params_df.loc[params_df["name"] == p, "hi"].iloc[0])])
@@ -2199,7 +2203,6 @@ if active_page == "records":
             '<span><span class="val-alert">↓ 3.1</span> Below range</span></div>',
             unsafe_allow_html=True,
         )
-        st.caption("⚠ = above range · ↓ = below range")
 
         csv_data = pd.DataFrame(csv_rows).to_csv(index=False).encode("utf-8")
         st.download_button(
