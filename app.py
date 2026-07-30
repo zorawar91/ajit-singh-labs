@@ -1794,7 +1794,7 @@ def render_chart(name, key_prefix="chart", period_days=None):
 # ============================================================================
 active_page = render_sidebar_nav()
 
-# -------- Overview tab --------
+# -------- Overview page --------
 if active_page == "overview":
     latest_date = ALL_DATES[0] if ALL_DATES else None
     high_n = low_n = norm_n = 0
@@ -1931,7 +1931,7 @@ if active_page == "overview":
             render_chart(name, key_prefix="ov")
 
 
-# -------- Trends tab --------
+# -------- Trends Browser page --------
 if active_page == "trends":
     st.markdown("## Trends Browser")
     st.caption("Visualize parameter trajectories over the selected timeframe.")
@@ -1962,7 +1962,7 @@ if active_page == "trends":
                 render_chart(p_row["name"], key_prefix="tr")
 
 
-# -------- Multi-Param overlay tab --------
+# -------- Compare Data page (Overlay Trends + By Date, via sub-toggle) --------
 if active_page == "compare":
     col_title, col_toggle = st.columns([3, 1])
     with col_title:
@@ -2100,12 +2100,10 @@ if active_page == "compare":
                 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
-# -------- Full Table tab --------
+# -------- Full Records page --------
 if active_page == "records":
-    col_title, col_export = st.columns([4, 1])
-    with col_title:
-        st.markdown("## Full Laboratory Records")
-        st.caption("Historical view of all validated clinical parameters over the selected monitoring period.")
+    st.markdown("## Full Laboratory Records")
+    st.caption("Historical view of all validated clinical parameters over the selected monitoring period.")
 
     col1, col2, col3 = st.columns([2, 2, 2])
     panel_t = col1.selectbox("Panel", ["All"] + PANELS, key="tbl_panel")
@@ -2175,4 +2173,7 @@ if active_page == "records":
 
 # Footer
 st.divider()
-st.caption(f"Built on Streamlit + Neon Postgres · Data refreshes on each browser reload (cached 5 min) · {len(ALL_DATES)} dates, {len(params_df)} parameters")
+st.caption(
+    f"🟢 DB: Connected · {len(ALL_DATES)} dates, {len(params_df)} parameters · "
+    "Visual analytics only — decisions must be made by a board-certified oncologist."
+)
