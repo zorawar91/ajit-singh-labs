@@ -148,9 +148,7 @@ st.markdown("""
   body, [class*="css"] { font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; }
   h1, h2, h3, h4 { font-family: 'Outfit', sans-serif; letter-spacing: -0.02em; }
   .font-mono-lab { font-family: 'JetBrains Mono', monospace; }
-
   .block-container { padding-top: 1rem; padding-bottom: 3rem; max-width: 1500px; }
-
   /* Every bordered Streamlit container (st.container(border=True)) becomes
      a "clinical-card": white surface, light border, small radius+shadow. */
   div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -166,28 +164,22 @@ st.markdown("""
   div[data-testid="column"] { display: flex !important; flex-direction: column !important; }
   div[data-testid="column"] > div { flex: 1 1 auto; }
   div[data-testid="column"] > div > div[data-testid="stVerticalBlock"] { height: 100%; }
-
   .param-desc { min-height: 2.8em; font-size: 11px; color: #475569; font-style: italic; line-height: 1.4; margin-top: 2px; }
   .param-meta { min-height: 1.2em; font-size: 11px; color: #64748b; margin-top: 4px; }
   .trend-line { min-height: 1.4em; font-size: 12px; color: #475569; margin-top: 4px; }
   .trend-line .up   { color: #b91c1c; font-weight: 700; }
   .trend-line .down { color: #15803d; font-weight: 700; }
   .trend-line .flat { color: #64748b; font-weight: 700; }
-
   .pill-high  { background: #fee2e2; color: #b91c1c; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid #ef4444; }
   .pill-low   { background: #fef3c7; color: #b45309; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid #f59e0b; }
   .pill-normal{ background: #dcfce7; color: #15803d; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid #22c55e; }
-
   .big-value.high   { color:#b91c1c; }
   .big-value.low    { color:#b45309; }
   .big-value.normal { color:#15803d; }
-
   div[data-testid="stMetricValue"] { font-size: 22px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
   div[data-testid="stMetricDelta"] { font-weight: 700; font-size: 13px; }
-
   .param-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
   .param-name { font-weight: 700; font-size: 14px; color: #0f172a; }
-
   .alert {
     background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444;
     border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; font-size: 13px;
@@ -195,7 +187,6 @@ st.markdown("""
   .alert .t { font-weight: 800; color: #991b1b; margin-bottom: 4px; }
   .alert .d { line-height: 1.7; }
   .alert .d b { color: #b91c1c; }
-
   /* Full Records table — plain, spacious, minimal color coding (approved
      in the last design round: no vertical borders, only row separators). */
   .simple-table { width: 100%; border-collapse: collapse; }
@@ -210,7 +201,6 @@ st.markdown("""
   .simple-table tr:nth-child(odd) { background: rgba(248,250,252,0.3); }
   .val-normal { color: #059669; font-weight: 600; }
   .val-alert  { color: #dc2626; font-weight: 600; }
-
   #MainMenu, footer { visibility: hidden; }
   [data-testid="stToolbar"] { visibility: hidden; }
   [data-testid="stExpandSidebarButton"] { visibility: visible; }
