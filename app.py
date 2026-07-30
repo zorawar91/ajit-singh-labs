@@ -12,6 +12,12 @@ Optional Streamlit secrets (UI display only — no PII in this code by default):
     patient_name   = "Patient name to show on the dashboard"
     patient_dx     = "Diagnosis or condition shown under the name"
     app_title      = "Lab Tracker"
+
+Optional Streamlit secrets (static patient constants — unlock extra scores):
+    patient_age    = 65        # unlocks FIB-4, CrCl, CKD-EPI
+    patient_sex    = "Male"    # unlocks CrCl, CKD-EPI, GNRI
+    height_cm      = 168       # unlocks BMI, GNRI, full Fearon cachexia criteria
+    usual_weight_kg = 65.0     # unlocks NRI
 """
 import json
 import hmac
@@ -33,6 +39,23 @@ import labtracker_lib as lib
 PATIENT_NAME = st.secrets.get("patient_name", "Patient")
 PATIENT_DX = st.secrets.get("patient_dx", "")
 APP_TITLE = st.secrets.get("app_title", "Lab Tracker")
+
+
+def _secret_float(key):
+    """Read an optional numeric secret, tolerating strings and blanks."""
+    try:
+        raw = st.secrets.get(key)
+        return float(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+# Static patient constants. Unlike lab values these never change, so they come
+# from secrets rather than the readings table — and keeping them out of the
+# code means this repo carries no PII.
+PATIENT_AGE = _secret_float("patient_age")
+PATIENT_SEX = st.secrets.get("patient_sex")
+HEIGHT_CM = _secret_float("height_cm")
 
 # Plain-language clinical context for each parameter (displayed under cards and charts)
 PARAM_INFO = {
@@ -403,12 +426,12 @@ def _render_cluster_card(title, icon, items):
 def _detail_insight_groups():
     return [
         ("Trajectory & Velocity", "📈", insight_streaks() + insight_velocity()),
-        ("Liver & Biliary",      "🫀", insight_liver_pattern() + insight_cholangitis_watch()),
-        ("Treatment Readiness",  "💊", insight_ctcae() + insight_chemo_ready() + insight_nadir_tracker()),
+        ("Liver & Biliary",      "🫀", insight_liver_pattern() + insight_cholangitis_watch() + insight_fib4()),
+        ("Treatment Readiness",  "💊", insight_ctcae() + insight_chemo_ready() + insight_nadir_tracker() + insight_renal_function()),
         ("Blood & Anemia",       "🩸", insight_anemia() + insight_fatigue()),
         ("Electrolytes",         "⚡", insight_electrolytes()),
         ("Prognostic Ratios",    "🔬", insight_car() + insight_cipi() + insight_nlr() + insight_plr()),
-        ("Nutrition Trajectory", "🍽️", insight_nri() + insight_pni_trajectory()),
+        ("Nutrition Trajectory", "🍽️", insight_bmi() + insight_gnri() + insight_nri() + insight_pni_trajectory()),
         ("Timeline & Patterns",  "🗓️", insight_time_since() + insight_clusters() + insight_best_worst()),
     ]
 
@@ -1169,6 +1192,7 @@ def insight_cachexia():
         # Look for a "6-months-ago" reference reading
         six_mo_ago = latest_d - pd.Timedelta(days=180)
         older = w_series[w_series["test_date"] <= six_mo_ago]
+        current_bmi = lib.bmi(latest_w, HEIGHT_CM)
         if not older.empty:
             ref_w = float(older.iloc[-1]["value"])
             ref_d = older.iloc[-1]["test_date"]
@@ -1176,6 +1200,13 @@ def insight_cachexia():
             if pct_change_6mo < -5:
                 fearon_triggered = True
                 flags.append(f"Weight loss {abs(pct_change_6mo):.1f}% over 6 months (Fearon criterion for cachexia)")
+            # Second Fearon criterion: BMI <20 drops the weight-loss threshold
+            # from 5% to 2%. Only computable once height is known.
+            elif current_bmi is not None and current_bmi < 20 and pct_change_6mo < -2:
+                fearon_triggered = True
+                flags.append(
+                    f"Weight loss {abs(pct_change_6mo):.1f}% with BMI {current_bmi:.1f} "
+                    f"(Fearon criterion: BMI <20 lowers the threshold to 2%)")
         # Short-term trend within available data
         recent_change = (latest_w - earliest_w) / earliest_w * 100 if earliest_w > 0 else 0
         recent_from_nadir = (latest_w - nadir_v) / nadir_v * 100 if nadir_v > 0 else 0
@@ -1256,6 +1287,119 @@ def insight_nri():
         f"Buzby's Nutritional Risk Index = 1.519 × Albumin(g/L) + 41.7 × (current wt / usual wt). "
         f"Current weight {latest_w:.1f} kg vs usual {usual_wt:.1f} kg ({pct_change:+.1f}%); Albumin {alb['value']:.1f} g/dL. "
         f"Bands: >100 well · 97.5–100 mild · 83.5–97.5 moderate · <83.5 severe."))
+    return out
+
+
+# ---- 14c. GNRI — Geriatric Nutritional Risk Index (needs height + sex) ----
+def insight_gnri():
+    out = []
+    alb = get_latest('Albumin')
+    w_series = _series_asc('Weight')
+    if not alb or w_series.empty:
+        return out
+    latest_w = float(w_series.iloc[-1]["value"])
+    value = lib.gnri(alb['value'], latest_w, HEIGHT_CM, PATIENT_SEX)
+    if value is None:
+        return out
+    band = lib.gnri_band(value)
+    color = {"no risk": "improving", "low risk": "watching",
+             "moderate risk": "watching", "major risk": "concern"}[band]
+    ibw = lib.ideal_body_weight_kg(HEIGHT_CM, PATIENT_SEX)
+    out.append(("🍽️", color,
+        f"<b>GNRI: {value:.1f}</b> — {band}. "
+        f"14.89 × Albumin {alb['value']:.1f} g/dL + 41.7 × (weight {latest_w:.1f} ÷ ideal {ibw:.1f} kg). "
+        f"Unlike NRI this needs no pre-illness weight, so it stays computable when usual weight is unknown. "
+        f"Bands: >98 none · 92–98 low · 82–92 moderate · <82 major."))
+    return out
+
+
+# ---- 14d. Body mass index ----
+def insight_bmi():
+    out = []
+    w_series = _series_asc('Weight')
+    if w_series.empty:
+        return out
+    latest_w = float(w_series.iloc[-1]["value"])
+    value = lib.bmi(latest_w, HEIGHT_CM)
+    if value is None:
+        return out
+    if value < 18.5:
+        band, color = "underweight", "concern"
+    elif value < 20:
+        band, color = "low — below the Fearon cachexia threshold", "watching"
+    elif value < 25:
+        band, color = "normal", "improving"
+    else:
+        band, color = "above normal", "stable"
+    out.append(("📏", color,
+        f"<b>BMI: {value:.1f}</b> — {band}. {latest_w:.1f} kg at {HEIGHT_CM:.0f} cm. "
+        f"BMI <20 is one of the three Fearon cachexia entry criteria, where it "
+        f"lowers the weight-loss threshold from 5% to 2%."))
+    return out
+
+
+# ---- 14e. Renal function — CrCl (chemo dosing) vs CKD-EPI (CKD staging) ----
+def insight_renal_function():
+    out = []
+    creat = get_latest('Creatinine')
+    if not creat:
+        return out
+    w_series = _series_asc('Weight')
+    latest_w = float(w_series.iloc[-1]["value"]) if not w_series.empty else None
+
+    crcl = lib.cockcroft_gault_crcl(PATIENT_AGE, latest_w, creat['value'], PATIENT_SEX)
+    egfr = lib.ckd_epi_2021_egfr(creat['value'], PATIENT_AGE, PATIENT_SEX)
+    if crcl is None and egfr is None:
+        return out
+
+    parts = []
+    if crcl is not None:
+        parts.append(f"<b>CrCl (Cockcroft-Gault): {crcl:.0f} mL/min</b>")
+    if egfr is not None:
+        parts.append(f"<b>eGFR (CKD-EPI 2021): {egfr:.0f} mL/min/1.73m²</b>")
+
+    worst = min([v for v in (crcl, egfr) if v is not None])
+    if worst >= 60:
+        color = "improving"
+    elif worst >= 30:
+        color = "watching"
+    else:
+        color = "concern"
+
+    note = ""
+    if crcl is not None and egfr is not None and abs(crcl - egfr) >= 15:
+        note = (f" The two disagree by {abs(crcl - egfr):.0f} — expected at low body weight, "
+                f"since Cockcroft-Gault scales with actual weight and CKD-EPI does not. "
+                f"Chemo dose nomograms use CrCl; CKD staging uses eGFR.")
+    out.append(("💧", color,
+        f"{' · '.join(parts)}. Creatinine {creat['value']:.2f} mg/dL"
+        f"{f', weight {latest_w:.1f} kg' if latest_w else ''}, age {PATIENT_AGE:.0f}.{note}"))
+    return out
+
+
+# ---- 14f. FIB-4 — liver fibrosis index ----
+def insight_fib4():
+    out = []
+    ast = get_latest('AST (SGOT)')
+    alt = get_latest('ALT (SGPT)')
+    plt = get_latest('Platelet Count')
+    if not (ast and alt and plt):
+        return out
+    value = lib.fib4(PATIENT_AGE, ast['value'], alt['value'], plt['value'])
+    if value is None:
+        return out
+    band = lib.fib4_band(value, PATIENT_AGE)
+    color = {"advanced fibrosis unlikely": "improving",
+             "indeterminate": "watching",
+             "advanced fibrosis likely": "concern"}[band]
+    age_note = ""
+    if PATIENT_AGE and PATIENT_AGE >= 65:
+        age_note = " Lower cutoff raised to 2.0 for age ≥65, where 1.45 over-calls fibrosis."
+    out.append(("🫀", color,
+        f"<b>FIB-4: {value:.2f}</b> — {band}. "
+        f"(age {PATIENT_AGE:.0f} × AST {ast['value']:.0f}) ÷ (Platelets {plt['value']:.0f} × √ALT {alt['value']:.0f})."
+        f"{age_note} Note FIB-4 was validated in chronic hepatitis, not biliary obstruction — "
+        f"read it alongside the cholestatic pattern, not instead of it."))
     return out
 
 
