@@ -178,6 +178,10 @@ st.markdown("""
   .pill-low   { background: #fef3c7; color: #b45309; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid #f59e0b; }
   .pill-normal{ background: #dcfce7; color: #15803d; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid #22c55e; }
 
+  .big-value.high   { color:#b91c1c; }
+  .big-value.low    { color:#b45309; }
+  .big-value.normal { color:#15803d; }
+
   div[data-testid="stMetricValue"] { font-size: 22px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
   div[data-testid="stMetricDelta"] { font-weight: 700; font-size: 13px; }
 
@@ -356,6 +360,44 @@ def render_sidebar_nav() -> str:
     return st.session_state["nav_page"]
 
 
+def _cluster_insights():
+    """Group existing insight_*() output into the 4 themed clusters the
+    Precision Clinical design calls for. Returns a dict of
+    {cluster_title: (icon, [(icon, color_class, text), ...])}."""
+    liver = (insight_albi() + insight_meldna() + insight_bili_fraction())[:3]
+    tumor = (insight_mgps() + insight_sii() + insight_ca199_trajectory())[:3]
+    nutrition = (insight_pni() + insight_cachexia())[:3]
+    trajectory = (insight_streaks() + insight_velocity())[:3]
+    return {
+        "Liver Function": ("🫀", liver),
+        "Tumor / Inflammation": ("🔬", tumor),
+        "Nutrition & Status": ("🍽️", nutrition),
+        "Recent Trajectory": ("📈", trajectory),
+    }
+
+
+def _render_cluster_card(title, icon, items):
+    with st.container(border=True):
+        st.markdown(
+            f"<div style='font-size:11px; font-weight:700; color:#94a3b8; "
+            f"text-transform:uppercase; letter-spacing:.05em; margin-bottom:12px;'>"
+            f"{icon} {title}</div>",
+            unsafe_allow_html=True,
+        )
+        if not items:
+            st.markdown("<span style='font-size:12px; color:#94a3b8;'>Not enough data yet.</span>", unsafe_allow_html=True)
+            return
+        color_map = {"improving": "#15803d", "stable": "#475569", "watching": "#b45309", "concern": "#b91c1c"}
+        for line_icon, color_class, text in items:
+            border_color = color_map.get(color_class, "#94a3b8")
+            st.markdown(
+                f"<div style='font-size:12px; line-height:1.5; padding:6px 0 6px 10px; "
+                f"margin:6px 0; border-left:3px solid {border_color};'>"
+                f"<span style='margin-right:6px;'>{line_icon}</span>{text}</div>",
+                unsafe_allow_html=True,
+            )
+
+
 if not check_password():
     st.stop()
 
@@ -467,53 +509,6 @@ def get_previous(param_name, before_date):
 # ============================================================================
 render_header()
 
-# Patient banner
-latest_date = ALL_DATES[0] if ALL_DATES else None
-high_n = low_n = norm_n = 0
-if latest_date:
-    day_readings = readings_df[readings_df["test_date"] == latest_date]
-    for _, r in day_readings.iterrows():
-        if pd.isna(r["value"]):
-            continue
-        p_row = params_df[params_df["name"] == r["parameter"]].iloc[0]
-        s = status_of(p_row, float(r["value"]))
-        if s == "high":
-            high_n += 1
-        elif s == "low":
-            low_n += 1
-        else:
-            norm_n += 1
-
-banner_html = f"""
-<div class="patient-banner">
-  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
-    <div>
-      <div style="font-size:18px; font-weight:700;">{PATIENT_NAME}</div>
-      {f'<div style="font-size:11px; color:#2563eb; font-weight:600; text-transform:uppercase; letter-spacing:.5px;">{PATIENT_DX}</div>' if PATIENT_DX else ''}
-      <div style="font-size:12px; color:#64748b; margin-top:6px;">
-        <b>Total reports:</b> {len(ALL_DATES)} dates &nbsp;·&nbsp;
-        <b>Latest:</b> {latest_date.strftime('%d-%b-%Y') if latest_date else '—'}
-      </div>
-    </div>
-    <div style="display:flex; gap:10px;">
-      <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:8px 14px; min-width:90px; text-align:center;">
-        <div style="font-size:22px; font-weight:700; color:#16a34a;">{norm_n}</div>
-        <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:.5px;">Normal</div>
-      </div>
-      <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px 14px; min-width:90px; text-align:center;">
-        <div style="font-size:22px; font-weight:700; color:#d97706;">{low_n}</div>
-        <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:.5px;">Below Range</div>
-      </div>
-      <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:8px 14px; min-width:90px; text-align:center;">
-        <div style="font-size:22px; font-weight:700; color:#dc2626;">{high_n}</div>
-        <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:.5px;">Above Range</div>
-      </div>
-    </div>
-  </div>
-</div>
-"""
-st.markdown(banner_html, unsafe_allow_html=True)
-
 # ============================================================================
 # Critical alerts
 # ============================================================================
@@ -536,15 +531,6 @@ def build_alerts():
         if p["name"] == "Absolute Neutrophil Count" and val < 0.5:
             critical.append((p["name"], f"{fmt_num(val, mult)} /µL — severe neutropenia"))
     return critical
-
-
-alerts = build_alerts()
-if alerts:
-    html_items = " &nbsp;·&nbsp; ".join(f"<b>{n}:</b> {r}" for n, r in alerts)
-    st.markdown(
-        f'<div class="alert"><div class="t">⚠ Notable values on latest report ({latest_date.strftime("%d-%b-%Y")})</div><div class="d">{html_items}</div></div>',
-        unsafe_allow_html=True,
-    )
 
 
 # ============================================================================
@@ -1761,161 +1747,122 @@ active_page = render_sidebar_nav()
 
 # -------- Overview tab --------
 if active_page == "overview":
-    # ===== Clinical Watch =====
-    with st.expander("🔍 Clinical Watch — automated summary across recent readings", expanded=True):
-        st.caption("Discuss specifics with the treating oncologist.")
-        findings = build_watch()
-        buckets = [
-            ("improving", "✓ Improving"),
-            ("stable", "○ Stable / In Range"),
-            ("watching", "◐ Watching"),
-            ("concern", "! Concerns"),
-        ]
-        non_empty = [(k, t) for k, t in buckets if findings[k]]
-        if non_empty:
-            cols = st.columns(len(non_empty))
-            for col, (k, title) in zip(cols, non_empty):
-                items = findings[k]
-                with col:
-                    items_html = "".join(f'<div class="watch-item"><b>{n}</b><span>{d}</span></div>' for n, d in items)
-                    st.markdown(f'<div class="watch-card {k}"><h4>{title} ({len(items)})</h4>{items_html}</div>', unsafe_allow_html=True)
-        else:
-            st.info("Not enough data points yet for trend assessment.")
+    latest_date = ALL_DATES[0] if ALL_DATES else None
+    high_n = low_n = norm_n = 0
+    if latest_date:
+        day_readings = readings_df[readings_df["test_date"] == latest_date]
+        for _, r in day_readings.iterrows():
+            if pd.isna(r["value"]):
+                continue
+            p_row = params_df[params_df["name"] == r["parameter"]].iloc[0]
+            s = status_of(p_row, float(r["value"]))
+            if s == "high":
+                high_n += 1
+            elif s == "low":
+                low_n += 1
+            else:
+                norm_n += 1
 
-    # ===== Clinical Insights =====
-    with st.expander("🩺 Clinical Insights — auto-derived observations", expanded=True):
-        st.caption("Pattern observations, not medical advice — always discuss with the treating oncologist.")
-        insight_groups = [
-            ("Persistence patterns",          insight_streaks()),
-            ("Liver injury pattern",          insight_liver_pattern()),
-            ("Rate of change",                insight_velocity()),
-            ("Time since events",             insight_time_since()),
-            ("Markers moving together",       insight_clusters()),
-            ("Anemia classification",         insight_anemia()),
-            ("Fatigue cause analysis",        insight_fatigue()),
-            ("Electrolyte balance",           insight_electrolytes()),
-        ]
-        insight_groups = [(t, items) for t, items in insight_groups if items]
-        if not insight_groups:
-            st.info("Not enough data yet to surface insights — needs at least 3 consecutive readings per parameter.")
-        else:
-            for i in range(0, len(insight_groups), 2):
-                row = insight_groups[i:i+2]
-                cols = st.columns(len(row))
-                for col, (title, items) in zip(cols, row):
-                    with col:
-                        with st.container(border=True):
-                            st.markdown(f"<div style='font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#2563eb; margin-bottom:8px;'>{title}</div>", unsafe_allow_html=True)
-                            for icon, color_class, text in items:
-                                color_map = {"improving":"#15803d", "stable":"#475569", "watching":"#b45309", "concern":"#b91c1c"}
-                                border_color = color_map.get(color_class, "#94a3b8")
-                                st.markdown(
-                                    f"<div style='font-size:13px; line-height:1.5; padding:6px 10px; margin:6px 0; border-left:3px solid {border_color}; background:#fff; border-radius:0 6px 6px 0;'>"
-                                    f"<span style='margin-right:6px;'>{icon}</span>{text}"
-                                    f"</div>",
-                                    unsafe_allow_html=True,
-                                )
+    # Patient quick-info banner
+    col_info, col_counts = st.columns([3, 2])
+    with col_info:
+        dx_pill = (
+            f'<span style="background:#eff6ff; color:#1d4ed8; font-size:11px; '
+            f'font-weight:700; padding:2px 8px; border-radius:4px; border:1px solid #dbeafe; '
+            f'text-transform:uppercase;">{PATIENT_DX}</span>' if PATIENT_DX else ""
+        )
+        st.markdown(
+            f"""<div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
+              <h2 style="margin:0; font-size:28px;">{PATIENT_NAME}</h2>{dx_pill}
+            </div>
+            <p style="color:#64748b; font-size:14px; margin:0;">
+              Last updated: <b style="color:#334155;">{latest_date.strftime('%d-%b-%Y') if latest_date else '—'}</b>
+              (Report #{len(ALL_DATES)}) &nbsp;•&nbsp; <i>{meta.get('subtitle', 'Discuss results with your oncology team.')}</i>
+            </p>""",
+            unsafe_allow_html=True,
+        )
+    with col_counts:
+        c1, c2, c3 = st.columns(3)
+        for col, label, count, color in [
+            (c1, "Normal", norm_n, "#059669"), (c2, "Warning", low_n, "#d97706"), (c3, "Critical", high_n, "#dc2626"),
+        ]:
+            with col:
+                with st.container(border=True):
+                    st.markdown(
+                        f"<div style='font-size:10px; font-weight:700; color:#94a3b8; "
+                        f"text-transform:uppercase;'>{label}</div>"
+                        f"<div class='font-mono-lab' style='font-size:24px; font-weight:700; color:{color};'>{count:02d}</div>",
+                        unsafe_allow_html=True,
+                    )
 
-    # ===== Unique Insights (cancer + cholangiocarcinoma-specific scores) =====
-    with st.expander("⭐ Unique Insights — cancer & cholangiocarcinoma-specific scores", expanded=True):
-        st.caption("Validated oncology scores and patterns specific to biliary cancer management. Not a replacement for the treating oncologist's clinical judgment.")
-        unique_groups = [
-            # Liver function severity scores
-            ("Liver Function Scores (ALBI + MELD-Na)", insight_albi() + insight_meldna()),
-            # Cancer prognostic ratios — all validated in oncology literature
-            ("Cancer Prognostic Scores (mGPS · PNI · CAR · SII · CIPI · NLR · PLR)",
-                insight_mgps() + insight_pni() + insight_car() + insight_sii()
-                + insight_cipi() + insight_nlr() + insight_plr()),
-            ("CA 19-9 Trajectory",            insight_ca199_trajectory()),
-            ("CTCAE Chemo Toxicity",          insight_ctcae()),
-            ("Pre-Chemo Readiness",           insight_chemo_ready()),
-            ("Bilirubin Direct Fraction",     insight_bili_fraction()),
-            ("Cholangitis / Stent Watch",     insight_cholangitis_watch()),
-            ("PNI Recovery Trajectory",       insight_pni_trajectory()),
-            ("Cytopenia Nadir Tracker",       insight_nadir_tracker()),
-            ("Cachexia / Nutrition Risk",     insight_cachexia() + insight_nri()),
-        ]
-        unique_groups = [(t, items) for t, items in unique_groups if items]
-        if not unique_groups:
-            st.info("Not enough data yet to compute the cancer-specific scores.")
-        else:
-            for i in range(0, len(unique_groups), 2):
-                row = unique_groups[i:i+2]
-                cols = st.columns(len(row))
-                for col, (title, items) in zip(cols, row):
-                    with col:
-                        with st.container(border=True):
-                            st.markdown(
-                                f"<div style='font-size:12px; font-weight:800; text-transform:uppercase; "
-                                f"letter-spacing:.5px; color:#7c3aed; margin-bottom:8px;'>{title}</div>",
-                                unsafe_allow_html=True,
-                            )
-                            for icon, color_class, text in items:
-                                color_map = {"improving":"#15803d", "stable":"#475569", "watching":"#b45309", "concern":"#b91c1c"}
-                                border_color = color_map.get(color_class, "#94a3b8")
-                                st.markdown(
-                                    f"<div style='font-size:13px; line-height:1.5; padding:6px 10px; margin:6px 0; "
-                                    f"border-left:3px solid {border_color}; background:#fff; border-radius:0 6px 6px 0;'>"
-                                    f"<span style='margin-right:6px;'>{icon}</span>{text}"
-                                    f"</div>",
-                                    unsafe_allow_html=True,
-                                )
+    # Critical alerts (existing build_alerts(), unchanged)
+    alerts = build_alerts()
+    if alerts:
+        html_items = " &nbsp;·&nbsp; ".join(f"<b>{n}:</b> {r}" for n, r in alerts)
+        st.markdown(
+            f'<div class="alert"><div class="t">⚠ Priority Clinical Findings (Latest Report — {latest_date.strftime("%d-%b-%Y")})</div>'
+            f'<div class="d">{html_items}</div></div>',
+            unsafe_allow_html=True,
+        )
 
-    # ===== Latest Results =====
-    _latest_str = latest_date.strftime('%d-%b-%Y') if latest_date else '—'
-    with st.expander(f"📋 Latest Results — as of {_latest_str}", expanded=True):
-        KEY_PARAMS = ['Hemoglobin (Hb)', 'Platelet Count', 'WBC / Total Leukocyte Count',
-                      'Bilirubin - Total', 'ALT (SGPT)', 'AST (SGOT)', 'GGT',
-                      'Alkaline Phosphatase (ALP)', 'Albumin', 'CRP', 'Creatinine', 'CA 19-9']
-        rows = [KEY_PARAMS[i:i+4] for i in range(0, len(KEY_PARAMS), 4)]
-        for row in rows:
-            cols = st.columns(len(row))
-            for col, name in zip(cols, row):
-                if not (params_df["name"] == name).any():
-                    continue
-                p_row = params_df[params_df["name"] == name].iloc[0]
-                latest = get_latest(name)
-                if not latest:
-                    continue
-                prev = get_previous(name, latest["date"])
-                mult, unit = display_info(p_row)
-                s = status_of(p_row, latest["value"])
-                value_str = f"{fmt_num(latest['value'], mult)} {unit}"
-                desc = PARAM_INFO.get(name, "")
-                trend_html = ""
-                if prev:
-                    diff = latest["value"] - prev["value"]
-                    if abs(diff) >= 0.005:
-                        arrow = "↑" if diff > 0 else "↓"
-                        cls = "up" if diff > 0 else "down"
-                        trend_html = f'<div class="trend-line"><span class="{cls}">{arrow} {fmt_num(abs(diff), mult)}</span> vs prior ({fmt_num(prev["value"], mult)})</div>'
-                    else:
-                        trend_html = '<div class="trend-line"><span class="flat">→ no change</span> vs prior</div>'
-                with col:
-                    with st.container(border=True):
-                        st.markdown(
-                            f"""
-                            <div class="param-head">
-                              <span class="param-name">{name}</span>
-                              <span class="pill-{s}">{s}</span>
-                            </div>
-                            {f'<div class="param-desc">{desc}</div>' if desc else ''}
-                            <div class="big-value {s}">{value_str}</div>
-                            <div class="param-meta">ref {fmt_range(p_row)} {unit} &nbsp;·&nbsp; {latest["date"].strftime("%d-%b-%Y")}</div>
-                            {trend_html}
-                            """,
-                            unsafe_allow_html=True,
-                        )
+    # Clinical Prognostic Panels — Clinical View only
+    if st.session_state.get("view_mode") == "Clinical View":
+        st.markdown("### 🩺 Clinical Prognostic Panels")
+        clusters = _cluster_insights()
+        cols = st.columns(4)
+        for col, (title, (icon, items)) in zip(cols, clusters.items()):
+            with col:
+                _render_cluster_card(title, icon, items)
 
-    # ===== Key Trends =====
-    with st.expander("📈 Key Trends — 14 most relevant parameters", expanded=False):
-        st.caption("Click ⛶ on any chart to expand.")
-        chart_cols = st.columns(2)
-        for i, name in enumerate(CHARTED):
+    # Latest Laboratory Results
+    st.markdown("### 📋 Latest Laboratory Results")
+    KEY_PARAMS = ['Hemoglobin (Hb)', 'Platelet Count', 'WBC / Total Leukocyte Count',
+                  'Bilirubin - Total', 'ALT (SGPT)', 'AST (SGOT)', 'GGT',
+                  'Alkaline Phosphatase (ALP)', 'Albumin', 'CRP', 'Creatinine', 'CA 19-9']
+    rows = [KEY_PARAMS[i:i+4] for i in range(0, len(KEY_PARAMS), 4)]
+    for row in rows:
+        cols = st.columns(len(row))
+        for col, name in zip(cols, row):
             if not (params_df["name"] == name).any():
                 continue
-            with chart_cols[i % 2]:
-                render_chart(name, key_prefix="ov")
+            p_row = params_df[params_df["name"] == name].iloc[0]
+            latest = get_latest(name)
+            if not latest:
+                continue
+            prev = get_previous(name, latest["date"])
+            mult, unit = display_info(p_row)
+            s = status_of(p_row, latest["value"])
+            desc = PARAM_INFO.get(name, "")
+            trend_html = ""
+            if prev:
+                diff = latest["value"] - prev["value"]
+                if abs(diff) >= 0.005:
+                    arrow = "↑" if diff > 0 else "↓"
+                    cls = "up" if diff > 0 else "down"
+                    trend_html = f'<div class="trend-line"><span class="{cls}">{arrow} {fmt_num(abs(diff), mult)}</span> vs prior</div>'
+                else:
+                    trend_html = '<div class="trend-line"><span class="flat">→ no change</span> vs prior</div>'
+            with col:
+                with st.container(border=True):
+                    st.markdown(
+                        f"""<div class="param-head"><span class="param-name">{name}</span>
+                          <span class="pill-{s}">{s.upper()}</span></div>
+                        {f'<div class="param-desc">{desc}</div>' if desc else ''}
+                        <div class="big-value {s} font-mono-lab" style="font-size:26px; font-weight:800; margin:6px 0;">{fmt_num(latest['value'], mult)}
+                          <span style="font-size:11px; color:#94a3b8; font-family:'Plus Jakarta Sans',sans-serif;">{unit}</span></div>
+                        <div class="param-meta">Ref: {fmt_range(p_row)}</div>
+                        {trend_html}""",
+                        unsafe_allow_html=True,
+                    )
+
+    # Key Trajectories — respects the header's global period control
+    st.markdown("### 📈 Key Trajectories (locked to selected period)")
+    chart_cols = st.columns(2)
+    for i, name in enumerate(CHARTED):
+        if not (params_df["name"] == name).any():
+            continue
+        with chart_cols[i % 2]:
+            render_chart(name, key_prefix="ov")
 
 
 # -------- Trends tab --------
