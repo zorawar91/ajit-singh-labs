@@ -398,6 +398,55 @@ def _render_cluster_card(title, icon, items):
             )
 
 
+# Insight groups NOT surfaced in the four summary clusters above. Rendered in
+# the collapsed "Full Clinical Detail" section so nothing the app computes is
+# hidden from the treating clinician.
+def _detail_insight_groups():
+    return [
+        ("Liver & Biliary",      "🫀", insight_liver_pattern() + insight_cholangitis_watch()),
+        ("Treatment Readiness",  "💊", insight_ctcae() + insight_chemo_ready() + insight_nadir_tracker()),
+        ("Blood & Anemia",       "🩸", insight_anemia() + insight_fatigue()),
+        ("Electrolytes",         "⚡", insight_electrolytes()),
+        ("Prognostic Ratios",    "🔬", insight_car() + insight_cipi() + insight_nlr() + insight_plr()),
+        ("Nutrition Trajectory", "🍽️", insight_nri() + insight_pni_trajectory()),
+        ("Timeline & Patterns",  "🗓️", insight_time_since() + insight_clusters() + insight_best_worst()),
+    ]
+
+
+def _render_watch_buckets():
+    """Render build_watch()'s four buckets. build_watch() returns a dict of
+    (name, detail) 2-tuples — a different shape from the insight_*() 3-tuples —
+    so it gets its own renderer rather than reusing _render_cluster_card()."""
+    findings = build_watch()
+    buckets = [
+        ("improving", "Improving",         "#15803d"),
+        ("stable",    "Stable / In Range", "#475569"),
+        ("watching",  "Watching",          "#b45309"),
+        ("concern",   "Concerns",          "#b91c1c"),
+    ]
+    non_empty = [(k, label, color) for k, label, color in buckets if findings.get(k)]
+    if not non_empty:
+        st.caption("Not enough data yet for trend assessment.")
+        return
+    cols = st.columns(len(non_empty))
+    for col, (k, label, color) in zip(cols, non_empty):
+        with col:
+            with st.container(border=True):
+                st.markdown(
+                    f"<div style='font-size:11px; font-weight:700; color:{color}; "
+                    f"text-transform:uppercase; letter-spacing:.05em; margin-bottom:10px;'>"
+                    f"{label} ({len(findings[k])})</div>",
+                    unsafe_allow_html=True,
+                )
+                for name, detail in findings[k]:
+                    st.markdown(
+                        f"<div style='font-size:12px; line-height:1.5; padding:6px 0 6px 10px; "
+                        f"margin:6px 0; border-left:3px solid {color};'>"
+                        f"<b>{name}</b><br><span style='color:#475569;'>{detail}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+
 if not check_password():
     st.stop()
 
@@ -1813,6 +1862,23 @@ if active_page == "overview":
         for col, (title, (icon, items)) in zip(cols, clusters.items()):
             with col:
                 _render_cluster_card(title, icon, items)
+
+    if st.session_state.get("view_mode") == "Clinical View":
+        with st.expander("🔬 Full Clinical Detail — every computed score", expanded=False):
+            st.caption("Pattern observations, not medical advice — discuss with the treating oncologist.")
+            st.markdown("##### Clinical Watch")
+            _render_watch_buckets()
+            st.markdown("##### Detailed Findings")
+            _groups = [(t, i, items) for t, i, items in _detail_insight_groups() if items]
+            if not _groups:
+                st.caption("Not enough data yet to surface detailed findings.")
+            else:
+                for _row_start in range(0, len(_groups), 2):
+                    _row = _groups[_row_start:_row_start + 2]
+                    _cols = st.columns(len(_row))
+                    for _col, (_title, _icon, _items) in zip(_cols, _row):
+                        with _col:
+                            _render_cluster_card(_title, _icon, _items)
 
     # Latest Laboratory Results
     st.markdown("### 📋 Latest Laboratory Results")
