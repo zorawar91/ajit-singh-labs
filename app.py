@@ -1933,22 +1933,22 @@ if active_page == "overview":
 
 # -------- Trends tab --------
 if active_page == "trends":
-    col1, col2, col3 = st.columns([2, 2, 1])
+    st.markdown("## Trends Browser")
+    st.caption("Visualize parameter trajectories over the selected timeframe.")
+
+    col1, col2 = st.columns(2)
     panel_filter = col1.selectbox("Panel", ["All panels"] + PANELS, key="tr_panel")
     param_options = ["All charted parameters"] + sorted(params_df["name"].tolist())
     param_filter = col2.selectbox("Parameter", param_options, key="tr_param")
-    period = col3.selectbox("Period", ["All time", "Last 30 days", "Last 90 days", "Last 6 months", "Last 1 year"], key="tr_period")
 
     sel_params = params_df.copy()
     if panel_filter != "All panels":
         sel_params = sel_params[sel_params["panel"] == panel_filter]
     if param_filter != "All charted parameters":
         sel_params = sel_params[sel_params["name"] == param_filter]
-    # Only params with ≥1 numeric reading
     sel_params = sel_params[sel_params["name"].isin(
         readings_df[readings_df["value"].notna()]["parameter"].unique()
     )]
-    # Sort by # readings desc
     counts = readings_df[readings_df["value"].notna()].groupby("parameter").size()
     sel_params["n"] = sel_params["name"].map(counts).fillna(0)
     sel_params = sel_params.sort_values("n", ascending=False)
@@ -1956,12 +1956,10 @@ if active_page == "trends":
     if sel_params.empty:
         st.info("No data for this selection.")
     else:
-        period_days = {"All time": None, "Last 30 days": 30, "Last 90 days": 90,
-                       "Last 6 months": 180, "Last 1 year": 365}[period]
         chart_cols = st.columns(2)
         for i, (_, p_row) in enumerate(sel_params.iterrows()):
             with chart_cols[i % 2]:
-                render_chart(p_row["name"], period_days=period_days, key_prefix="tr")
+                render_chart(p_row["name"], key_prefix="tr")
 
 
 # -------- Multi-Param overlay tab --------
