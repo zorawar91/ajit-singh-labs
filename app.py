@@ -2102,11 +2102,15 @@ if active_page == "compare":
 
 # -------- Full Table tab --------
 if active_page == "records":
-    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+    col_title, col_export = st.columns([4, 1])
+    with col_title:
+        st.markdown("## Full Laboratory Records")
+        st.caption("Historical view of all validated clinical parameters over the selected monitoring period.")
+
+    col1, col2, col3 = st.columns([2, 2, 2])
     panel_t = col1.selectbox("Panel", ["All"] + PANELS, key="tbl_panel")
     search = col2.text_input("Search parameter", "", key="tbl_search")
-    period_t = col3.selectbox("Period", ["All time", "Last 30 days", "Last 90 days", "Last 6 months", "Last 1 year"], key="tbl_period")
-    order_t = col4.selectbox("Date order", ["Newest → Oldest", "Oldest → Newest"], key="tbl_order")
+    order_t = col3.selectbox("Date order", ["Newest → Oldest", "Oldest → Newest"], key="tbl_order")
 
     sel = params_df.copy()
     if panel_t != "All":
@@ -2115,35 +2119,56 @@ if active_page == "records":
         sel = sel[sel["name"].str.lower().str.contains(search.lower())]
 
     dates = sorted(ALL_DATES)
-    if period_t != "All time":
-        cutoff = max(dates) - pd.Timedelta(days={"Last 30 days": 30, "Last 90 days": 90,
-                                                  "Last 6 months": 180, "Last 1 year": 365}[period_t])
+    period_days = lib.period_days_for(st.session_state.get("global_period", "ALL"))
+    if period_days is not None and dates:
+        cutoff = max(dates) - pd.Timedelta(days=period_days)
         dates = [d for d in dates if d >= cutoff]
     if order_t == "Newest → Oldest":
         dates = list(reversed(dates))
 
     if not sel.empty and dates:
-        table_rows = []
-        for _, p in sel.iterrows():
-            mult, unit = display_info(p)
-            row = {"Parameter": p["name"], "Unit": unit, "Reference": fmt_range(p)}
-            for d in dates:
-                v = readings_df[(readings_df["parameter"] == p["name"]) & (readings_df["test_date"] == d)]["value"]
-                if v.empty or pd.isna(v.iloc[0]):
-                    row[d.strftime("%d-%b-%Y")] = ""
-                else:
-                    val = float(v.iloc[0])
-                    s = status_of(p, val)
-                    formatted = fmt_num(val, mult)
-                    if s == "high":
-                        formatted = f"⚠ {formatted}"
-                    elif s == "low":
-                        formatted = f"↓ {formatted}"
-                    row[d.strftime("%d-%b-%Y")] = formatted
-            table_rows.append(row)
-        df_out = pd.DataFrame(table_rows)
-        st.dataframe(df_out, use_container_width=True, hide_index=True, height=600)
-        st.caption("⚠ = above range · ↓ = below range")
+        header_cells = "".join(f"<th>{d.strftime('%d %b')}</th>" for d in dates)
+        body_rows = []
+        for panel in ([panel_t] if panel_t != "All" else PANELS):
+            panel_rows = sel[sel["panel"] == panel]
+            if panel_rows.empty:
+                continue
+            body_rows.append(
+                f'<tr style="background:rgba(248,250,252,0.5);"><td colspan="{3+len(dates)}" '
+                f'style="padding:12px 24px; font-size:11px; font-weight:700; color:#94a3b8; '
+                f'text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid #e2e8f0;">{panel}</td></tr>'
+            )
+            for _, p in panel_rows.iterrows():
+                mult, unit = display_info(p)
+                cells = f'<td style="font-weight:600; color:#334155;">{p["name"]}</td>'
+                cells += f'<td style="color:#64748b;">{unit}</td>'
+                cells += f'<td style="color:#64748b; font-style:italic;">{fmt_range(p)}</td>'
+                for d in dates:
+                    v = readings_df[(readings_df["parameter"] == p["name"]) & (readings_df["test_date"] == d)]["value"]
+                    if v.empty or pd.isna(v.iloc[0]):
+                        cells += "<td>—</td>"
+                    else:
+                        val = float(v.iloc[0])
+                        s = status_of(p, val)
+                        cls = "val-alert" if s in ("high", "low") else "val-normal"
+                        cells += f'<td class="{cls}">{fmt_num(val, mult)}</td>'
+                body_rows.append(f"<tr>{cells}</tr>")
+
+        st.markdown(
+            f"""<div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
+              <table class="simple-table">
+                <thead><tr><th>Parameter</th><th>Unit</th><th>Ref Range</th>{header_cells}</tr></thead>
+                <tbody>{''.join(body_rows)}</tbody>
+              </table>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div style="margin-top:16px; display:flex; gap:32px; font-size:11px; color:#64748b; text-transform:uppercase;">'
+            '<span><span class="val-normal">12.5</span> Within reference range</span>'
+            '<span><span class="val-alert">48.2</span> Outside reference range</span></div>',
+            unsafe_allow_html=True,
+        )
     else:
         st.info("No data to display.")
 
