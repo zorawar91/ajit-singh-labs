@@ -6,7 +6,7 @@ This folder hosts the same dashboard as the local HTML version, but built with *
 
 | File | Purpose |
 |---|---|
-| `app.py` | The Streamlit app (Overview / Trends / Compare Dates / Full Table) |
+| `app.py` | The Streamlit app — sidebar nav across four pages (Overview / Trends Browser / Compare Data / Full Records), with a persistent header holding one unified period control (3M/6M/9M/1Y/ALL) and a Family/Clinical View toggle |
 | `schema.sql` | Postgres schema for `parameters`, `readings`, `metadata` |
 | `sync_to_neon.py` | Loads `../Lab Dashboard/data.json` and writes to Neon |
 | `requirements.txt` | Python deps for Streamlit Cloud |

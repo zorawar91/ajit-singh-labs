@@ -211,7 +211,8 @@ st.markdown("""
   .val-normal { color: #059669; font-weight: 600; }
   .val-alert  { color: #dc2626; font-weight: 600; }
 
-  #MainMenu, footer, header { visibility: hidden; }
+  #MainMenu, footer { visibility: hidden; }
+  [data-testid="stToolbar"] { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -230,6 +231,13 @@ def _keep_view():
     Runs at the start of the rerun, before widgets are instantiated."""
     if st.session_state.get("view_mode") is None:
         st.session_state["view_mode"] = "Clinical View"
+
+
+def _keep_compare_mode():
+    """Callback to restore compare_mode to default if deselected to None.
+    Runs at the start of the rerun, before widgets are instantiated."""
+    if st.session_state.get("compare_mode") is None:
+        st.session_state["compare_mode"] = "Overlay Trends"
 
 
 # ============================================================================
@@ -295,13 +303,13 @@ def render_header():
             )
         with col_period:
             st.segmented_control(
-                "Period", lib.PERIOD_OPTIONS, default="ALL",
+                "Period", lib.PERIOD_OPTIONS,
                 key="global_period", label_visibility="collapsed",
                 on_change=_keep_period,
             )
         with col_view:
             st.segmented_control(
-                "View", ["Family", "Clinical View"], default="Clinical View",
+                "View", ["Family", "Clinical View"],
                 key="view_mode", label_visibility="collapsed",
                 on_change=_keep_view,
             )
@@ -403,6 +411,7 @@ def _render_cluster_card(title, icon, items):
 # hidden from the treating clinician.
 def _detail_insight_groups():
     return [
+        ("Trajectory & Velocity", "📈", insight_streaks() + insight_velocity()),
         ("Liver & Biliary",      "🫀", insight_liver_pattern() + insight_cholangitis_watch()),
         ("Treatment Readiness",  "💊", insight_ctcae() + insight_chemo_ready() + insight_nadir_tracker()),
         ("Blood & Anemia",       "🩸", insight_anemia() + insight_fatigue()),
@@ -1734,7 +1743,7 @@ def render_chart(name, key_prefix="chart", period_days=None):
     p_row = params_df[params_df["name"] == name].iloc[0]
     df = get_readings(name)
     effective_period_days = period_days if period_days is not None else lib.period_days_for(
-        st.session_state.get("global_period", "ALL")
+        st.session_state.get("global_period") or "ALL"
     )
     if effective_period_days is not None and not df.empty:
         cutoff = max(df["test_date"]) - pd.Timedelta(days=effective_period_days)
@@ -1916,7 +1925,7 @@ if active_page == "overview":
                         {f'<div class="param-desc">{desc}</div>' if desc else ''}
                         <div class="big-value {s} font-mono-lab" style="font-size:26px; font-weight:800; margin:6px 0;">{fmt_num(latest['value'], mult)}
                           <span style="font-size:11px; color:#94a3b8; font-family:'Plus Jakarta Sans',sans-serif;">{unit}</span></div>
-                        <div class="param-meta">Ref: {fmt_range(p_row)}</div>
+                        <div class="param-meta">ref {fmt_range(p_row)} {unit} &nbsp;·&nbsp; {latest["date"].strftime("%d-%b-%Y")}</div>
                         {trend_html}""",
                         unsafe_allow_html=True,
                     )
@@ -1968,13 +1977,15 @@ if active_page == "compare":
     with col_title:
         st.markdown("## Compare Analytical Data")
         st.caption("Cross-parameter normalization and longitudinal comparison.")
+    st.session_state.setdefault("compare_mode", "Overlay Trends")
     with col_toggle:
         st.segmented_control(
-            "Mode", ["Overlay Trends", "By Date"], default="Overlay Trends",
+            "Mode", ["Overlay Trends", "By Date"],
             key="compare_mode", label_visibility="collapsed",
+            on_change=_keep_compare_mode,
         )
 
-    if st.session_state.get("compare_mode", "Overlay Trends") == "Overlay Trends":
+    if st.session_state.get("compare_mode") == "Overlay Trends":
         default_set = ["Bilirubin - Total", "Alkaline Phosphatase (ALP)", "GGT", "CRP", "CA 19-9"]
         available = sorted([p for p in params_df["name"].tolist()
                             if pd.notna(params_df.loc[params_df["name"] == p, "hi"].iloc[0])])
@@ -1992,7 +2003,7 @@ if active_page == "compare":
                 st.info("Pick at least one parameter from the dropdown.")
             else:
                 palette = ["#2563eb", "#6366f1", "#10b981", "#f59e0b", "#f43f5e"]
-                period_days = lib.period_days_for(st.session_state.get("global_period", "ALL"))
+                period_days = lib.period_days_for(st.session_state.get("global_period") or "ALL")
 
                 fig = go.Figure()
                 for i, name in enumerate(selected):
@@ -2050,7 +2061,7 @@ if active_page == "compare":
                                     <span style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase;">{name}</span>
                                   </div>
                                   <div class="font-mono-lab" style="font-size:16px; font-weight:700;">{fmt_num(latest['value'], mult)} <span style="font-size:10px; color:#94a3b8;">{unit}</span></div>
-                                  <div style="font-size:10px; color:#94a3b8; margin-top:2px;">{pct_str} • Ref: {fmt_range(p_row)}</div>
+                                  <div style="font-size:10px; color:#94a3b8; margin-top:2px;">{pct_str} • Ref: {fmt_range(p_row)} • {latest["date"].strftime("%d-%b-%Y")}</div>
                                 </div>""",
                                 unsafe_allow_html=True,
                             )
@@ -2117,7 +2128,7 @@ if active_page == "records":
         sel = sel[sel["name"].str.lower().str.contains(search.lower())]
 
     dates = sorted(ALL_DATES)
-    period_days = lib.period_days_for(st.session_state.get("global_period", "ALL"))
+    period_days = lib.period_days_for(st.session_state.get("global_period") or "ALL")
     if period_days is not None and dates:
         cutoff = max(dates) - pd.Timedelta(days=period_days)
         dates = [d for d in dates if d >= cutoff]
@@ -2127,33 +2138,53 @@ if active_page == "records":
     if not sel.empty and dates:
         header_cells = "".join(f"<th>{d.strftime('%d %b')}</th>" for d in dates)
         body_rows = []
-        for panel in ([panel_t] if panel_t != "All" else PANELS):
-            panel_rows = sel[sel["panel"] == panel]
+        csv_rows = []
+
+        # Panel groups to render. When a specific panel is selected there's
+        # nothing ungrouped to add; when "All" is selected, append an
+        # "Ungrouped" bucket so parameters with a NULL/missing panel
+        # (permitted by schema.sql, written by sync_to_neon.py) still render
+        # instead of being silently dropped.
+        if panel_t != "All":
+            panel_groups = [(panel_t, sel[sel["panel"] == panel_t])]
+        else:
+            panel_groups = [(p, sel[sel["panel"] == p]) for p in PANELS]
+            ungrouped_rows = sel[sel["panel"].isna()]
+            if not ungrouped_rows.empty:
+                panel_groups.append(("Ungrouped", ungrouped_rows))
+
+        for panel_label, panel_rows in panel_groups:
             if panel_rows.empty:
                 continue
             body_rows.append(
                 f'<tr style="background:rgba(248,250,252,0.5);"><td colspan="{3+len(dates)}" '
                 f'style="padding:12px 24px; font-size:11px; font-weight:700; color:#94a3b8; '
-                f'text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid #e2e8f0;">{panel}</td></tr>'
+                f'text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid #e2e8f0;">{panel_label}</td></tr>'
             )
             for _, p in panel_rows.iterrows():
                 mult, unit = display_info(p)
                 cells = f'<td style="font-weight:600; color:#334155;">{p["name"]}</td>'
                 cells += f'<td style="color:#64748b;">{unit}</td>'
                 cells += f'<td style="color:#64748b; font-style:italic;">{fmt_range(p)}</td>'
+                csv_row = {"Parameter": p["name"], "Panel": panel_label, "Unit": unit, "Reference": fmt_range(p)}
                 for d in dates:
                     v = readings_df[(readings_df["parameter"] == p["name"]) & (readings_df["test_date"] == d)]["value"]
+                    date_label = d.strftime("%d-%b-%Y")
                     if v.empty or pd.isna(v.iloc[0]):
                         cells += "<td>—</td>"
+                        csv_row[date_label] = ""
                     else:
                         val = float(v.iloc[0])
                         s = status_of(p, val)
                         cls = "val-alert" if s in ("high", "low") else "val-normal"
-                        cells += f'<td class="{cls}">{fmt_num(val, mult)}</td>'
+                        glyph = "⚠ " if s == "high" else "↓ " if s == "low" else ""
+                        cells += f'<td class="{cls}">{glyph}{fmt_num(val, mult)}</td>'
+                        csv_row[date_label] = fmt_num(val, mult)
                 body_rows.append(f"<tr>{cells}</tr>")
+                csv_rows.append(csv_row)
 
         st.markdown(
-            f"""<div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
+            f"""<div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; overflow-x:auto;">
               <table class="simple-table">
                 <thead><tr><th>Parameter</th><th>Unit</th><th>Ref Range</th>{header_cells}</tr></thead>
                 <tbody>{''.join(body_rows)}</tbody>
@@ -2164,8 +2195,16 @@ if active_page == "records":
         st.markdown(
             '<div style="margin-top:16px; display:flex; gap:32px; font-size:11px; color:#64748b; text-transform:uppercase;">'
             '<span><span class="val-normal">12.5</span> Within reference range</span>'
-            '<span><span class="val-alert">48.2</span> Outside reference range</span></div>',
+            '<span><span class="val-alert">⚠ 48.2</span> Above range</span>'
+            '<span><span class="val-alert">↓ 3.1</span> Below range</span></div>',
             unsafe_allow_html=True,
+        )
+        st.caption("⚠ = above range · ↓ = below range")
+
+        csv_data = pd.DataFrame(csv_rows).to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download filtered table as CSV", data=csv_data,
+            file_name="lab_records.csv", mime="text/csv", key="tbl_csv_download",
         )
     else:
         st.info("No data to display.")
