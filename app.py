@@ -389,7 +389,9 @@ def _cluster_insights():
     liver = (insight_albi() + insight_meldna() + insight_bili_fraction())[:3]
     tumor = (insight_mgps() + insight_sii() + insight_ca199_trajectory())[:3]
     nutrition = (insight_pni() + insight_cachexia())[:3]
-    trajectory = (insight_streaks() + insight_velocity())[:3]
+    # FI-LAB leads the trajectory cluster: it's the one line that summarises
+    # the whole panel rather than a single organ system.
+    trajectory = (insight_filab() + insight_streaks() + insight_velocity())[:3]
     return {
         "Liver Function": ("🫀", liver),
         "Tumor / Inflammation": ("🔬", tumor),
@@ -427,9 +429,9 @@ def _detail_insight_groups():
     return [
         ("Trajectory & Velocity", "📈", insight_streaks() + insight_velocity()),
         ("Liver & Biliary",      "🫀", insight_liver_pattern() + insight_cholangitis_watch() + insight_fib4()),
-        ("Treatment Readiness",  "💊", insight_ctcae() + insight_chemo_ready() + insight_nadir_tracker() + insight_renal_function()),
+        ("Treatment Readiness",  "💊", insight_ctcae() + insight_chemo_ready() + insight_nadir_tracker() + insight_renal_function() + insight_tls()),
         ("Blood & Anemia",       "🩸", insight_anemia() + insight_fatigue()),
-        ("Electrolytes",         "⚡", insight_electrolytes()),
+        ("Electrolytes",         "⚡", insight_electrolytes() + insight_corrected_calcium()),
         ("Prognostic Ratios",    "🔬", insight_car() + insight_cipi() + insight_nlr() + insight_plr()),
         ("Nutrition Trajectory", "🍽️", insight_bmi() + insight_gnri() + insight_nri() + insight_pni_trajectory()),
         ("Timeline & Patterns",  "🗓️", insight_time_since() + insight_clusters() + insight_best_worst()),
@@ -1400,6 +1402,144 @@ def insight_fib4():
         f"(age {PATIENT_AGE:.0f} × AST {ast['value']:.0f}) ÷ (Platelets {plt['value']:.0f} × √ALT {alt['value']:.0f})."
         f"{age_note} Note FIB-4 was validated in chronic hepatitis, not biliary obstruction — "
         f"read it alongside the cholestatic pattern, not instead of it."))
+    return out
+
+
+# ---- 14g. FI-LAB — Frailty Index (Laboratory) ----
+# The only score here that reads the whole panel rather than a chosen few.
+FILAB_WINDOW_DAYS = 90
+
+
+def _filab_rows():
+    """Flatten params + readings into the {name, lo, hi, date, value} rows the
+    FI-LAB selector expects. Reference bounds are compared against raw stored
+    values, matching status_of() — the display multiplier is presentation only."""
+    bounds = {
+        p["name"]: (
+            float(p["lo"]) if pd.notna(p["lo"]) else None,
+            float(p["hi"]) if pd.notna(p["hi"]) else None,
+        )
+        for _, p in params_df.iterrows()
+    }
+    rows = []
+    for r in readings_df.itertuples(index=False):
+        if pd.isna(r.value):
+            continue
+        lo, hi = bounds.get(r.parameter, (None, None))
+        rows.append({"name": r.parameter, "lo": lo, "hi": hi,
+                     "date": r.test_date, "value": float(r.value)})
+    return rows
+
+
+def _filab_at(rows, as_of, window_days=FILAB_WINDOW_DAYS):
+    """FI-LAB and the number of parameters it was computed from, as of a date."""
+    obs = lib.select_current_observations(rows, as_of, window_days)
+    return lib.filab(obs), len(obs)
+
+
+def insight_filab():
+    out = []
+    if not ALL_DATES:
+        return out
+    rows = _filab_rows()
+    latest_d = max(ALL_DATES)
+    value, n = _filab_at(rows, latest_d)
+    if value is None or n < 5:
+        return out  # too thin a panel to be meaningful
+    band = lib.filab_band(value)
+    color = {"fit": "improving", "vulnerable": "watching", "frail": "concern"}[band]
+
+    # Direction of travel — the property that makes FI-LAB worth tracking.
+    trend = ""
+    prior_d = latest_d - pd.Timedelta(days=180)
+    prior_value, prior_n = _filab_at(rows, prior_d)
+    if prior_value is not None and prior_n >= 5:
+        delta = value - prior_value
+        arrow = "↑" if delta > 0.02 else "↓" if delta < -0.02 else "→"
+        word = "worsening" if delta > 0.02 else "improving" if delta < -0.02 else "flat"
+        trend = (f" {arrow} <b>{word}</b> vs 6 months ago "
+                 f"({prior_value:.2f} → {value:.2f}, {delta:+.2f}).")
+
+    out.append(("🧭", color,
+        f"<b>FI-LAB: {value:.2f} ({band})</b> — {int(round(value * n))} of {n} parameters "
+        f"outside their reference range in the last {FILAB_WINDOW_DAYS} days.{trend} "
+        f"Unlike the single-organ scores this reads the whole panel, so it's the closest "
+        f"thing here to one overall number. Bands: <0.20 fit · 0.20–0.35 vulnerable · >0.35 frail."))
+    return out
+
+
+# ---- 14h. Albumin-corrected calcium ----
+def insight_corrected_calcium():
+    out = []
+    ca = get_latest('Calcium')
+    alb = get_latest('Albumin')
+    if not (ca and alb):
+        return out
+    value = lib.corrected_calcium(ca['value'], alb['value'])
+    if value is None:
+        return out
+    band = lib.calcium_band(value)
+    color = {"normal": "improving", "hypocalcemia": "watching",
+             "mild hypercalcemia": "watching", "moderate hypercalcemia": "concern",
+             "severe hypercalcemia": "concern"}[band]
+    shift = value - ca['value']
+    note = ""
+    if shift >= 0.4 and lib.calcium_band(ca['value']) != band:
+        note = (f" Uncorrected calcium reads as "
+                f"<b>{lib.calcium_band(ca['value'])}</b> — the correction changes the interpretation.")
+    out.append(("🦴", color,
+        f"<b>Corrected calcium: {value:.2f} mg/dL</b> — {band}. "
+        f"Measured {ca['value']:.2f} + 0.8 × (4.0 − albumin {alb['value']:.1f}) = {shift:+.2f} adjustment. "
+        f"Albumin binds about half of serum calcium, so hypoalbuminemia makes the measured "
+        f"value under-read.{note}"))
+    return out
+
+
+# ---- 14i. Tumour lysis syndrome pattern screen (Cairo-Bishop labs) ----
+def insight_tls():
+    out = []
+    ua = get_latest('Uric Acid')
+    k = get_latest('Potassium')
+    phos = get_latest('Phosphorus')
+    ca = get_latest('Calcium')
+    alb = get_latest('Albumin')
+    available = [x for x in (ua, k, phos, ca) if x]
+    if not available:
+        return out
+
+    corr_ca = None
+    if ca and alb:
+        corr_ca = lib.corrected_calcium(ca['value'], alb['value'])
+    elif ca:
+        corr_ca = ca['value']
+
+    met = lib.tls_criteria_met(
+        uric_acid=ua['value'] if ua else None,
+        potassium=k['value'] if k else None,
+        phosphorus=phos['value'] if phos else None,
+        calcium=corr_ca,
+    )
+    measured = len(available)
+    missing = [n for n, x in (('Uric Acid', ua), ('Potassium', k),
+                              ('Phosphorus', phos), ('Calcium', ca)) if not x]
+
+    if len(met) >= 2:
+        color = "concern"
+        headline = f"<b>TLS pattern: {len(met)} of 4 criteria met</b> — meets the laboratory threshold."
+    elif met:
+        color = "watching"
+        headline = f"<b>TLS pattern: 1 of 4 criteria met</b> — below the 2-criteria threshold."
+    else:
+        color = "improving"
+        headline = f"<b>TLS pattern: no criteria met</b> across {measured} of 4 analytes."
+
+    detail = f" Met: {'; '.join(met)}." if met else ""
+    gap = f" Not measured: {', '.join(missing)}." if missing else ""
+    out.append(("⚗️", color,
+        f"{headline}{detail}{gap} Thresholds: uric acid ≥8, potassium ≥6, phosphorus ≥4.5, "
+        f"corrected calcium ≤7. <b>Screen only, not a diagnosis</b> — Cairo-Bishop is defined "
+        f"within 3 days before to 7 days after chemotherapy and also counts a 25% shift from "
+        f"pre-treatment baseline, neither of which this tracker records."))
     return out
 
 

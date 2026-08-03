@@ -6,6 +6,7 @@ of spinning up a Streamlit script run.
 from __future__ import annotations
 import math
 from collections import namedtuple
+from datetime import timedelta
 
 # ── Unified time-range control ───────────────────────────────────────────────
 # Replaces the 3 separate "Period" selectboxes (Trends / Compare Trends /
@@ -143,6 +144,136 @@ def fib4_band(value, age_years):
     if value <= 3.25:
         return "indeterminate"
     return "advanced fibrosis likely"
+
+
+# ── FI-LAB — Frailty Index (Laboratory) ──────────────────────────────────────
+# Howlett 2014. Unlike every other score here, FI-LAB reads the whole panel
+# rather than a handful of chosen analytes: it is simply the proportion of
+# results sitting outside their own reference range. That makes it a genuine
+# whole-organism summary, and it trends over time in a way single-domain
+# scores don't.
+
+def filab(observations):
+    """
+    Fraction of results falling outside their reference range.
+
+    `observations` is an iterable of (value, lo, hi). A parameter is assessable
+    when it has a value and at least one bound; parameters with neither bound
+    (Weight, ratios with no published range) are excluded from the denominator
+    rather than counted as non-deficits, which would dilute the index.
+
+    Returns None when nothing is assessable.
+    """
+    assessable = 0
+    deficits = 0
+    for value, lo, hi in observations:
+        if value is None:
+            continue
+        if lo is None and hi is None:
+            continue
+        assessable += 1
+        if (lo is not None and value < lo) or (hi is not None and value > hi):
+            deficits += 1
+    if assessable == 0:
+        return None
+    return deficits / assessable
+
+
+def select_current_observations(rows, as_of, window_days):
+    """
+    Reduce raw readings to one current observation per parameter.
+
+    `rows` are dicts of {name, lo, hi, date, value}. Keeps each parameter's most
+    recent reading at or before `as_of` and no older than `window_days`, so a
+    result from a year ago can't freeze the index at a stale value. Parameters
+    with no reference bounds are dropped here rather than in filab(), keeping
+    the returned list and the assessed count in agreement.
+    """
+    cutoff = as_of - timedelta(days=window_days)
+    latest = {}
+    for row in rows:
+        if row["value"] is None:
+            continue
+        if row["lo"] is None and row["hi"] is None:
+            continue
+        when = row["date"]
+        if when > as_of or when < cutoff:
+            continue
+        seen = latest.get(row["name"])
+        if seen is None or when >= seen["date"]:
+            latest[row["name"]] = row
+    return [(r["value"], r["lo"], r["hi"]) for r in latest.values()]
+
+
+def filab_band(value):
+    """Conventional FI-LAB cutoffs: <0.2 fit · 0.2–0.35 vulnerable · >0.35 frail."""
+    if value < 0.2:
+        return "fit"
+    if value <= 0.35:
+        return "vulnerable"
+    return "frail"
+
+
+# ── Calcium ──────────────────────────────────────────────────────────────────
+
+def corrected_calcium(calcium_mgdl, albumin_gdl):
+    """
+    Payne's albumin-corrected calcium (mg/dL).
+
+    Roughly half of serum calcium is albumin-bound, so hypoalbuminemia makes
+    total calcium under-read true (ionised) calcium — hypercalcemia of
+    malignancy can hide behind an apparently normal value.
+    """
+    if calcium_mgdl is None or albumin_gdl is None:
+        return None
+    return calcium_mgdl + 0.8 * (4.0 - albumin_gdl)
+
+
+def calcium_band(value):
+    """Bands for corrected calcium in mg/dL."""
+    if value < 8.5:
+        return "hypocalcemia"
+    if value <= 10.5:
+        return "normal"
+    if value <= 12.0:
+        return "mild hypercalcemia"
+    if value <= 14.0:
+        return "moderate hypercalcemia"
+    return "severe hypercalcemia"
+
+
+# ── Tumour lysis syndrome (Cairo-Bishop laboratory criteria) ─────────────────
+# Absolute thresholds only. The published definition also accepts a 25% shift
+# from a pre-treatment baseline within a −3/+7 day window around chemotherapy;
+# this tracker records neither chemo dates nor daily labs, so callers must
+# present the result as a pattern screen rather than a formal diagnosis.
+
+TLS_THRESHOLDS = {
+    "uric_acid": 8.0,    # mg/dL, >=
+    "potassium": 6.0,    # mEq/L, >=
+    "phosphorus": 4.5,   # mg/dL, >= (adult threshold)
+    "calcium": 7.0,      # mg/dL, <= (use corrected calcium)
+}
+
+
+def tls_criteria_met(uric_acid=None, potassium=None, phosphorus=None, calcium=None):
+    """
+    Return the Cairo-Bishop laboratory TLS criteria currently met.
+
+    Two or more constitutes laboratory TLS. Missing analytes are skipped, so a
+    short list can mean "few criteria met" or "few criteria measurable" —
+    callers should say which.
+    """
+    met = []
+    if uric_acid is not None and uric_acid >= TLS_THRESHOLDS["uric_acid"]:
+        met.append(f"Uric acid {uric_acid:.1f} ≥ {TLS_THRESHOLDS['uric_acid']} mg/dL")
+    if potassium is not None and potassium >= TLS_THRESHOLDS["potassium"]:
+        met.append(f"Potassium {potassium:.1f} ≥ {TLS_THRESHOLDS['potassium']} mEq/L")
+    if phosphorus is not None and phosphorus >= TLS_THRESHOLDS["phosphorus"]:
+        met.append(f"Phosphorus {phosphorus:.1f} ≥ {TLS_THRESHOLDS['phosphorus']} mg/dL")
+    if calcium is not None and calcium <= TLS_THRESHOLDS["calcium"]:
+        met.append(f"Corrected calcium {calcium:.1f} ≤ {TLS_THRESHOLDS['calcium']} mg/dL")
+    return met
 
 
 # ── Sidebar navigation (replaces st.tabs) ────────────────────────────────────
