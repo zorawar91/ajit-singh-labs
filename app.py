@@ -226,6 +226,20 @@ st.markdown("""
   .val-alert  { color: #dc2626; font-weight: 600; }
   #MainMenu, footer { visibility: hidden; }
   [data-testid="stToolbar"] { visibility: hidden; }
+  /* Streamlit's own header bar sits above our dark banner and inherits the
+     theme's white backgroundColor, which reads as a hard seam against the
+     #f8fafc page. Make it blend instead.
+     Do NOT display:none it — the sidebar-expand button is a child of this
+     header, and removing it strands a collapsed sidebar with no way back. */
+  [data-testid="stHeader"], [data-testid="stAppHeader"] {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    border-bottom: none !important;
+  }
+  /* The thin gradient strip Streamlit paints at the very top. Purely
+     decorative, holds no controls, so this one is safe to remove outright. */
+  [data-testid="stDecoration"] { display: none !important; }
   [data-testid="stExpandSidebarButton"] { visibility: visible; }
 </style>
 """, unsafe_allow_html=True)
