@@ -128,7 +128,8 @@ st.set_page_config(
     page_title=f"{APP_TITLE} — {PATIENT_NAME}",
     page_icon="🧪",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # Navigation lives in the frozen top bar now; there is no sidebar content.
+    initial_sidebar_state="collapsed",
 )
 
 # Inject meta description + Open Graph tags into the document <head>.
@@ -171,7 +172,9 @@ st.markdown("""
   body, [class*="css"] { font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; }
   h1, h2, h3, h4 { font-family: 'Outfit', sans-serif; letter-spacing: -0.02em; }
   .font-mono-lab { font-family: 'JetBrains Mono', monospace; }
-  .block-container { padding-top: 1rem; padding-bottom: 3rem; max-width: 1500px; }
+  /* Clears the fixed top bar, which is out of normal flow and would otherwise
+     overlap the first row of content. */
+  .block-container { padding-top: 150px; padding-bottom: 3rem; max-width: 1500px; }
   /* Every bordered Streamlit container (st.container(border=True)) becomes
      a "clinical-card": white surface, light border, small radius+shadow. */
   div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -226,21 +229,14 @@ st.markdown("""
   .val-alert  { color: #dc2626; font-weight: 600; }
   #MainMenu, footer { visibility: hidden; }
   [data-testid="stToolbar"] { visibility: hidden; }
-  /* Streamlit's own header bar sits above our dark banner and inherits the
-     theme's white backgroundColor, which reads as a hard seam against the
-     #f8fafc page. Make it blend instead.
-     Do NOT display:none it — the sidebar-expand button is a child of this
-     header, and removing it strands a collapsed sidebar with no way back. */
-  [data-testid="stHeader"], [data-testid="stAppHeader"] {
-    background: transparent !important;
-    backdrop-filter: none !important;
-    box-shadow: none !important;
-    border-bottom: none !important;
-  }
-  /* The thin gradient strip Streamlit paints at the very top. Purely
-     decorative, holds no controls, so this one is safe to remove outright. */
+  /* Nav moved into the frozen top bar, so there is no sidebar left to reopen
+     and therefore no expand button to protect. That makes it safe to remove
+     Streamlit's own header outright — it is position:absolute across the top
+     60px and would otherwise sit over the frozen bar and swallow clicks
+     aimed at the period control and Lock button. */
+  [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+  [data-testid="stHeader"], [data-testid="stAppHeader"] { display: none !important; }
   [data-testid="stDecoration"] { display: none !important; }
-  [data-testid="stExpandSidebarButton"] { visibility: visible; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -293,16 +289,29 @@ def check_password() -> bool:
     return False
 
 
-def render_header():
-    """Persistent dark header: brand, unified period control, Family/Clinical
-    toggle, and Lock. Uses st.container(key=...) so the wrapping element gets
-    a stable `st-key-app_header` CSS class we can style dark (see the CSS
-    block below) — this is the standard way to give a Streamlit container a
-    targetable class without relying on brittle structural selectors."""
+def render_header() -> str:
+    """Frozen dark top bar: brand + patient identity, page nav, unified period
+    control, Family/Clinical toggle, and Lock. Replaces the old left sidebar —
+    nav is now horizontal and travels with the viewport.
+
+    Uses st.container(key=...) so the wrapping element gets a stable
+    `st-key-app_header` class to target, rather than a brittle structural
+    selector. Returns the active page slug."""
     st.markdown("""
     <style>
+      /* Fixed, not sticky. The container's parent wrapper is exactly as tall
+         as the bar itself, so a sticky element has no travel room inside its
+         containing block and scrolls straight out of view. Fixed takes it out
+         of flow and pins it to the viewport; .block-container carries the
+         matching top padding.
+         The horizontal padding keeps the bar's contents on the same 1500px
+         column as the page body while the bar spans the full width. */
       .st-key-app_header {
-        background: #0f172a; border-radius: 10px; padding: 10px 20px; margin-bottom: 20px;
+        position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+        background: #0f172a;
+        padding: 10px max(2rem, calc((100vw - 1500px) / 2)) 6px;
+        margin: 0;
+        box-shadow: 0 4px 14px rgba(15,23,42,.18);
       }
       .st-key-app_header * { color: #f1f5f9 !important; }
       .st-key-app_header [data-testid="stMarkdownContainer"] p { margin: 0; }
@@ -310,22 +319,48 @@ def render_header():
         background: #1e293b !important; border-color: #334155 !important;
       }
       .st-key-app_header button:hover { background: #2563eb !important; border-color: #2563eb !important; }
+      .st-key-app_header [data-testid="stHorizontalBlock"] { gap: 0.5rem !important; }
+      .st-key-app_header [class*="st-key-nav_"] button {
+        background: transparent !important; border: none !important;
+        font-weight: 600 !important; font-size: 13px !important;
+        padding: 6px 10px !important; white-space: nowrap !important;
+      }
+      .st-key-app_header [class*="st-key-nav_"] button:hover {
+        background: #1e293b !important; color: #ffffff !important;
+      }
+      .app-dx-chip {
+        display:inline-block; background:#1e3a8a; color:#bfdbfe !important;
+        font-size:9px; font-weight:700; letter-spacing:.04em;
+        padding:2px 8px; border-radius:999px;
+      }
+      /* Below Streamlit's column-stacking breakpoint the bar's controls wrap
+         onto separate rows and it grows past 380px tall — measured. Frozen,
+         that would swallow half a phone screen and overlap the page content,
+         which no fixed padding can compensate for. So stop freezing it and let
+         it scroll away normally at narrow widths. */
+      @media (max-width: 800px) {
+        .st-key-app_header { position: static !important; box-shadow: none !important; }
+        .block-container { padding-top: 1rem !important; }
+      }
     </style>
     """, unsafe_allow_html=True)
 
     st.session_state.setdefault("global_period", "ALL")
     st.session_state.setdefault("view_mode", "Clinical View")
+    st.session_state.setdefault("nav_page", "overview")
 
     with st.container(key="app_header"):
-        col_brand, col_period, col_view, col_lock = st.columns([4, 3, 2, 1], vertical_alignment="center")
+        col_brand, col_period, col_view, col_lock = st.columns([5, 3, 2, 1], vertical_alignment="center")
         with col_brand:
+            dx_chip = f'<span class="app-dx-chip">{PATIENT_DX}</span>' if PATIENT_DX else ""
             st.markdown(
                 f"""<div style="display:flex; align-items:center; gap:10px;">
                   <span style="font-size:22px;">{lib.ICONS['lucide:test-tube-2']}</span>
                   <div>
                     <div style="font-size:13px; font-weight:700; letter-spacing:.02em; text-transform:uppercase;">{APP_TITLE}</div>
-                    <div style="font-size:10px; opacity:.7;">Clinical Monitoring • {PATIENT_NAME}</div>
+                    <div style="font-size:10px; opacity:.75;">{PATIENT_NAME}</div>
                   </div>
+                  {dx_chip}
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -346,54 +381,39 @@ def render_header():
                 st.session_state["authenticated"] = False
                 st.rerun()
 
-
-def render_sidebar_nav() -> str:
-    """Left sidebar nav replacing the old 5-tab bar. Buttons (not st.radio)
-    because each button's active/inactive background is set with an exact
-    hex value we already know in Python — no brittle :checked CSS needed."""
-    st.session_state.setdefault("nav_page", "overview")
-
-    with st.sidebar:
-        st.markdown("""
-        <style>
-          [data-testid="stSidebar"] button {
-            justify-content: flex-start !important; text-align: left !important;
-            border: none !important; background: transparent !important;
-            font-weight: 500 !important; padding: 10px 12px !important;
-          }
-          [data-testid="stSidebar"] button:hover { background: #f8fafc !important; }
-        </style>
-        """, unsafe_allow_html=True)
-
-        for item in lib.NAV_ITEMS:
-            is_active = st.session_state["nav_page"] == item.slug
-            if is_active:
-                st.markdown(f"""
-                <style>
-                .st-key-nav_{item.slug} button {{
-                  background: #eff6ff !important; color: #2563eb !important;
-                  border-right: 3px solid #2563eb !important; font-weight: 600 !important;
-                }}
-                </style>
-                """, unsafe_allow_html=True)
-            if st.button(f"{item.icon}  {item.label}", key=f"nav_{item.slug}", use_container_width=True):
-                st.session_state["nav_page"] = item.slug
-                st.rerun()
-
-        st.markdown("---")
-        st.markdown("""
-        <div style="background:#f8fafc; border-radius:8px; padding:12px;">
-          <div style="font-size:10px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Alert Thresholds</div>
-          <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:6px;">
-            <span style="color:#64748b;">Platelets</span><span style="font-weight:700; color:#dc2626;">&lt; 50k</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:11px;">
-            <span style="color:#64748b;">Neutrophils</span><span style="font-weight:700; color:#dc2626;">&lt; 0.5k</span>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Active-state CSS is emitted once, OUTSIDE the column loop. Emitting it
+        # inside a column adds a markdown element container above that button
+        # and knocks the active item out of line with its siblings.
+        st.markdown(f"""<style>
+          .st-key-nav_{st.session_state['nav_page']} button {{
+            background:#1e293b !important; color:#60a5fa !important;
+            box-shadow: inset 0 -2px 0 #2563eb !important;
+          }}</style>""", unsafe_allow_html=True)
+        # Narrow columns plus a wide trailing spacer keep the items clustered
+        # left like a menu bar instead of spreading edge to edge.
+        nav_cols = st.columns([1.1, 1.5, 1.4, 1.3, 6], vertical_alignment="center")
+        for col, item in zip(nav_cols, lib.NAV_ITEMS):
+            with col:
+                if st.button(f"{item.icon} {item.label}", key=f"nav_{item.slug}",
+                             use_container_width=True):
+                    st.session_state["nav_page"] = item.slug
+                    st.rerun()
 
     return st.session_state["nav_page"]
+
+
+def render_alert_thresholds():
+    """Alert thresholds panel. Lived in the sidebar until nav moved to the top
+    bar; now rendered on the Overview page."""
+    st.markdown("""
+    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; margin-bottom:16px;">
+      <div style="font-size:10px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Alert Thresholds</div>
+      <div style="display:flex; gap:24px; font-size:11px;">
+        <span><span style="color:#64748b;">Platelets</span> <span style="font-weight:700; color:#dc2626;">&lt; 50k</span></span>
+        <span><span style="color:#64748b;">Neutrophils</span> <span style="font-weight:700; color:#dc2626;">&lt; 0.5k</span></span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def _cluster_insights():
@@ -595,7 +615,7 @@ def get_previous(param_name, before_date):
 # ============================================================================
 # Header
 # ============================================================================
-render_header()
+ACTIVE_PAGE = render_header()
 
 # ============================================================================
 # Critical alerts
@@ -2090,7 +2110,8 @@ def render_chart(name, key_prefix="chart", period_days=None):
 # ============================================================================
 # Tabs
 # ============================================================================
-active_page = render_sidebar_nav()
+# Nav is rendered as part of the frozen top bar, above.
+active_page = ACTIVE_PAGE
 
 # -------- Overview page --------
 if active_page == "overview":
@@ -2141,6 +2162,9 @@ if active_page == "overview":
                         f"<div class='font-mono-lab' style='font-size:24px; font-weight:700; color:{color};'>{count:02d}</div>",
                         unsafe_allow_html=True,
                     )
+
+    # Relocated from the sidebar when nav moved into the frozen top bar.
+    render_alert_thresholds()
 
     # Critical alerts (existing build_alerts(), unchanged)
     alerts = build_alerts()
